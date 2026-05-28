@@ -125,9 +125,12 @@ body {
   gap: 16px;
 }
 
-.control-grid,
 .two-col {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.control-grid {
+  grid-template-columns: 1fr;
 }
 
 .four-col {
@@ -148,12 +151,13 @@ body {
 
 .choice-field {
   justify-content: flex-start;
+  gap: 10px;
 }
 
 .choice-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 10px;
 }
 
 input,
@@ -246,19 +250,44 @@ button:hover {
 }
 
 .choice-chip {
-  min-height: 68px;
-  min-width: 104px;
+  min-width: 88px;
   border: 1px solid rgba(41, 31, 18, 0.12);
   background: rgba(255, 255, 255, 0.86);
   color: var(--muted);
   font-weight: 700;
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+.choice-chip.compact {
+  min-height: 58px;
+}
+
+.choice-chip.mini {
+  min-height: 54px;
+  min-width: 82px;
 }
 
 .choice-chip.active {
   background: var(--brand);
   color: #fff8f2;
   border-color: rgba(190, 90, 43, 0.52);
-  box-shadow: 0 10px 24px rgba(190, 90, 43, 0.22);
+  box-shadow: 0 8px 18px rgba(190, 90, 43, 0.18);
+}
+
+.choice-chip-label {
+  line-height: 1;
+}
+
+.choice-chip-meta {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.78;
 }
 
 .summary-line {

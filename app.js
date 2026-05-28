@@ -1,4 +1,5 @@
 import { emptyDayStatus, isDayEmpty } from "./day-state.js";
+import { buildWeekDateMap, formatWeekRange, normalizeDayLabel } from "./week-calendar.js";
 
 const state = {
   weeks: [],
@@ -91,6 +92,7 @@ async function loadPlan(carry) {
     state.day = payload.day.activeDay;
     renderWeek(payload.week);
     renderDay(payload.day);
+    renderWeekTabs();
     setStatus("已同步当前周内容", "ok");
   } catch (error) {
     setStatus(`读取失败：${error.message}`, "error");
@@ -186,7 +188,9 @@ function renderWeekTabs() {
       createChoiceButton({
         active: week.path === state.weekPath,
         label: week.label,
+        meta: formatWeekRange(week.weekId || week.label),
         name: "week",
+        size: "compact",
         value: week.path,
       }),
     );
@@ -216,12 +220,16 @@ function renderDay(day) {
 
 function renderDayTabs(days, activeDay) {
   elements.dayTabs.innerHTML = "";
+  const dateMap = buildWeekDateMap(activeWeekId());
   days.forEach((day) => {
+    const weekday = normalizeDayLabel(day);
     elements.dayTabs.appendChild(
       createChoiceButton({
         active: day === activeDay,
-        label: day,
+        label: weekday,
+        meta: dateMap[weekday] || "",
         name: "day",
+        size: "mini",
         value: day,
       }),
     );
@@ -229,7 +237,6 @@ function renderDayTabs(days, activeDay) {
 }
 
 async function apiFetch(path, options = {}) {
-  const url = path;
   const requestOptions = {
     method: options.method || "GET",
     headers: {},
@@ -240,7 +247,7 @@ async function apiFetch(path, options = {}) {
     requestOptions.body = JSON.stringify(options.body);
   }
 
-  const response = await fetch(url, requestOptions);
+  const response = await fetch(path, requestOptions);
 
   if (!response.ok) {
     const text = await response.text();
@@ -261,14 +268,27 @@ function joinEntries(items) {
   return (items || []).join("\n\n");
 }
 
-function createChoiceButton({ active, label, name, value }) {
+function createChoiceButton({ active, label, meta, name, size, value }) {
   const button = document.createElement("button");
+  const title = document.createElement("span");
+  const detail = document.createElement("span");
+
   button.type = "button";
-  button.className = `choice-chip${active ? " active" : ""}`;
+  button.className = `choice-chip ${size || "compact"}${active ? " active" : ""}`;
   button.dataset.name = name;
   button.dataset.value = value;
   button.setAttribute("aria-pressed", active ? "true" : "false");
-  button.textContent = label;
+
+  title.className = "choice-chip-label";
+  title.textContent = label;
+  button.appendChild(title);
+
+  if (meta) {
+    detail.className = "choice-chip-meta";
+    detail.textContent = meta;
+    button.appendChild(detail);
+  }
+
   return button;
 }
 
@@ -314,4 +334,9 @@ function clearDayFields() {
 function setStatus(message, tone) {
   elements.status.textContent = message;
   elements.status.dataset.tone = tone;
+}
+
+function activeWeekId() {
+  const activeWeek = state.weeks.find((week) => week.path === state.weekPath);
+  return activeWeek?.weekId || activeWeek?.label || "";
 }
