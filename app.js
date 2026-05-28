@@ -1,14 +1,10 @@
 const state = {
-  apiBase: "",
-  token: "",
   weeks: [],
   weekPath: "",
   day: "",
 };
 
 const elements = {
-  apiBase: document.getElementById("api-base"),
-  apiToken: document.getElementById("api-token"),
   connectBtn: document.getElementById("connect-btn"),
   refreshBtn: document.getElementById("refresh-btn"),
   weekSelect: document.getElementById("week-select"),
@@ -36,11 +32,6 @@ const elements = {
 bootstrap();
 
 function bootstrap() {
-  state.apiBase = localStorage.getItem("day-plan-api-base") || "";
-  state.token = localStorage.getItem("day-plan-token") || "";
-  elements.apiBase.value = state.apiBase;
-  elements.apiToken.value = state.token;
-
   elements.connectBtn.addEventListener("click", connectAndLoad);
   elements.refreshBtn.addEventListener("click", () => loadPlan(""));
   elements.weekSelect.addEventListener("change", () => {
@@ -60,24 +51,10 @@ function bootstrap() {
   });
   elements.saveWeeklyBtn.addEventListener("click", saveWeekly);
   elements.saveDailyBtn.addEventListener("click", saveDaily);
-
-  if (state.apiBase && state.token) {
-    connectAndLoad();
-  }
+  connectAndLoad();
 }
 
 async function connectAndLoad() {
-  state.apiBase = normalizeBase(elements.apiBase.value);
-  state.token = elements.apiToken.value.trim();
-
-  localStorage.setItem("day-plan-api-base", state.apiBase);
-  localStorage.setItem("day-plan-token", state.token);
-
-  if (!state.apiBase || !state.token) {
-    setStatus("先填 ngrok 地址和 Bearer Token", "error");
-    return;
-  }
-
   setStatus("连接中…", "pending");
 
   try {
@@ -92,11 +69,6 @@ async function connectAndLoad() {
 }
 
 async function loadPlan(carry) {
-  if (!state.apiBase || !state.token) {
-    setStatus("先完成连接", "error");
-    return;
-  }
-
   if (!state.weekPath) {
     state.weekPath = elements.weekSelect.value;
   }
@@ -230,12 +202,10 @@ function renderDayOptions(days, activeDay) {
 }
 
 async function apiFetch(path, options = {}) {
-  const url = `${state.apiBase}${path}`;
+  const url = path;
   const requestOptions = {
     method: options.method || "GET",
-    headers: {
-      Authorization: `Bearer ${state.token}`,
-    },
+    headers: {},
   };
 
   if (options.body) {
@@ -262,10 +232,6 @@ function splitEntries(raw) {
 
 function joinEntries(items) {
   return (items || []).join("\n\n");
-}
-
-function normalizeBase(base) {
-  return base.trim().replace(/\/+$/, "");
 }
 
 function setStatus(message, tone) {
