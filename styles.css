@@ -275,9 +275,15 @@ button:hover {
 
 .choice-chip.active {
   background: var(--brand);
-  color: #fff8f2;
+  color: #ffffff;
   border-color: rgba(190, 90, 43, 0.52);
   box-shadow: 0 8px 18px rgba(190, 90, 43, 0.18);
+}
+
+.choice-chip.active .choice-chip-label,
+.choice-chip.active .choice-chip-meta {
+  color: #ffffff;
+  opacity: 1;
 }
 
 .choice-chip-label {
