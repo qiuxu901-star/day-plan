@@ -17,25 +17,16 @@
     <section class="panel settings-panel">
       <div class="panel-head">
         <div>
-          <p class="panel-kicker">连接设置</p>
-          <h2>先连到你的本机写回服务</h2>
+          <p class="panel-kicker">服务状态</p>
+          <h2>页面会自动连接你的写回服务</h2>
         </div>
         <div id="global-status" class="status-pill">等待连接</div>
       </div>
 
-      <div class="settings-grid">
-        <label class="field">
-          <span>API Base URL</span>
-          <input id="api-base" type="url" placeholder="https://xxxx.ngrok-free.app">
-        </label>
-        <label class="field">
-          <span>Bearer Token</span>
-          <input id="api-token" type="password" placeholder="输入本机服务 Token">
-        </label>
-      </div>
+      <p class="subtitle compact-subtitle">如果本机 API 和 ngrok 正在运行，页面会在打开时自动加载，不需要再手动填写连接参数。</p>
 
       <div class="toolbar">
-        <button id="connect-btn" class="primary">连接并加载</button>
+        <button id="connect-btn" class="primary">重新连接</button>
         <button id="refresh-btn" class="secondary">刷新当前周</button>
       </div>
     </section>
