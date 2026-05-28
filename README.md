@@ -2,12 +2,12 @@
 
 一个部署在 Vercel 上的单页计划录入页。
 
-它本身不直接保存 Obsidian 文件，而是通过 `ngrok` 暴露的本机 API 把内容写回你的 `WK` 文件。
+现在页面会通过同源 `/api/*` 代理自动连接到你的本机写回服务，不需要再在浏览器里手动输入 `ngrok URL` 和 `Bearer Token`。
 
 ## 页面能力
 
 - 单页录入周计划 + 日计划
-- 读取最近 3 个 `WK` 文件
+- 自动读取最近 3 个 `WK` 文件
 - 切换当前日期
 - 承接昨日 `明日优先`
 - 承接昨日 `迁移项`
@@ -19,40 +19,28 @@
 - `index.html`：页面结构
 - `styles.css`：页面样式
 - `app.js`：前端逻辑
-- `vercel.json`：Vercel 静态部署配置
+- `api/`：Vercel 服务端代理
+- `vercel.json`：Vercel 部署配置
 
-## 本机 API 要求
+## 工作方式
 
-本机服务需要提供：
+浏览器访问 Vercel 页面后：
 
-- `GET /api/weeks`
-- `GET /api/plan`
-- `POST /api/save/weekly`
-- `POST /api/save/daily`
+1. 页面请求同源 `/api/*`
+2. Vercel 服务端代理转发到当前本机 `ngrok` 地址
+3. 代理在服务端附加本机写回 API 所需的 Bearer Token
+4. 本机 API 再把内容写回 Obsidian `WK` 文件
 
-并要求请求头：
+## 本机侧要求
 
-```text
-Authorization: Bearer <DAY_PLAN_API_TOKEN>
-```
+本机需要同时运行：
 
-## 本机服务启动
+- `00_Codex/day-plan-vercel/start_local_api.sh`
+- `00_Codex/day-plan-vercel/start_ngrok.sh`
 
-在 Obsidian vault 根目录执行：
+当前代理默认连接到一次有效的 `ngrok` 地址；如果未来隧道地址变化，建议把它改成 Vercel 环境变量：
 
-```bash
-export DAY_PLAN_API_TOKEN="替换成你自己的长 Token"
-PYTHONPATH="$PWD/00_Codex" python3 00_Codex/weekly_planner/local_web.py
-```
+- `LOCAL_API_BASE_URL`
+- `LOCAL_API_TOKEN`
 
-## ngrok 暴露
-
-```bash
-ngrok http 8765
-```
-
-把生成的公网地址填到页面顶部的 `API Base URL`。
-
-## Vercel 部署
-
-当前仓库已经是静态站点结构，直接在 Vercel 里 `Import Git Repository` 这个仓库即可。
+这样就不需要把当前地址和 token 固化在代码里。
