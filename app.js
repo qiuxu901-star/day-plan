@@ -1,3 +1,5 @@
+import { emptyDayStatus, isDayEmpty } from "./day-state.js";
+
 const state = {
   weeks: [],
   weekPath: "",
@@ -7,6 +9,7 @@ const state = {
 const elements = {
   connectBtn: document.getElementById("connect-btn"),
   refreshBtn: document.getElementById("refresh-btn"),
+  createNextWeekBtn: document.getElementById("create-next-week-btn"),
   weekSelect: document.getElementById("week-select"),
   daySelect: document.getElementById("day-select"),
   previousSummary: document.getElementById("previous-summary"),
@@ -34,13 +37,18 @@ bootstrap();
 function bootstrap() {
   elements.connectBtn.addEventListener("click", connectAndLoad);
   elements.refreshBtn.addEventListener("click", () => loadPlan(""));
+  elements.createNextWeekBtn.addEventListener("click", createNextWeek);
   elements.weekSelect.addEventListener("change", () => {
     state.weekPath = elements.weekSelect.value;
     state.day = "";
+    clearDayFields();
+    setStatus("正在切换周文件…", "pending");
     loadPlan("");
   });
   elements.daySelect.addEventListener("change", () => {
     state.day = elements.daySelect.value;
+    clearDayFields();
+    setStatus(`正在切换到 ${state.day}…`, "pending");
     loadPlan("");
   });
   elements.carryNextUp.addEventListener("click", () => loadPlan("next_up"));
@@ -154,6 +162,31 @@ async function saveDaily() {
   }
 }
 
+async function createNextWeek() {
+  if (!state.weekPath) {
+    setStatus("先选择一个来源 WK 文件", "error");
+    return;
+  }
+
+  setStatus("正在新建下一周 WK，并承接上周遗留…", "pending");
+
+  try {
+    const payload = await apiFetch("/api/weeks/create-next", {
+      method: "POST",
+      body: { wk: state.weekPath },
+    });
+    state.weeks = payload.weeks || [];
+    state.weekPath = payload.weekPath;
+    state.day = "";
+    renderWeekOptions();
+    clearDayFields();
+    await loadPlan("");
+    setStatus(`已新建 ${payload.weekId}，上周遗留已带入本周重点`, "ok");
+  } catch (error) {
+    setStatus(`新建下一周失败：${error.message}`, "error");
+  }
+}
+
 function renderWeekOptions() {
   elements.weekSelect.innerHTML = "";
   state.weeks.forEach((week) => {
@@ -178,7 +211,7 @@ function renderWeek(week) {
 function renderDay(day) {
   state.day = day.activeDay;
   renderDayOptions(day.availableDays, day.activeDay);
-  elements.previousSummary.textContent = `昨日参考：${day.previousSummary}`;
+  elements.previousSummary.textContent = `昨日参考（不会自动算作今天内容）：${day.previousSummary}`;
   elements.priorities.value = joinEntries(day.priorities);
   elements.inbox.value = joinEntries(day.inbox);
   elements.completed.value = joinEntries(day.completed);
@@ -186,6 +219,7 @@ function renderDay(day) {
   elements.dropped.value = joinEntries(day.dropped);
   elements.interruptions.value = joinEntries(day.interruptions);
   elements.nextUp.value = joinEntries(day.nextUp);
+  setStatus(emptyDayStatus(day), isDayEmpty(day) ? "warn" : "ok");
 }
 
 function renderDayOptions(days, activeDay) {
@@ -232,6 +266,17 @@ function splitEntries(raw) {
 
 function joinEntries(items) {
   return (items || []).join("\n\n");
+}
+
+function clearDayFields() {
+  elements.priorities.value = "";
+  elements.inbox.value = "";
+  elements.completed.value = "";
+  elements.migrated.value = "";
+  elements.dropped.value = "";
+  elements.interruptions.value = "";
+  elements.nextUp.value = "";
+  elements.previousSummary.textContent = "昨日参考（不会自动算作今天内容）：加载中…";
 }
 
 function setStatus(message, tone) {
