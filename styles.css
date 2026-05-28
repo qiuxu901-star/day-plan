@@ -160,9 +160,14 @@ textarea {
   border: 1px solid rgba(41, 31, 18, 0.12);
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.82);
-  padding: 14px 16px;
+  padding: 16px 18px;
   color: var(--text);
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+input,
+select {
+  min-height: 68px;
 }
 
 input:focus,
@@ -174,13 +179,13 @@ textarea:focus {
 }
 
 textarea {
-  min-height: 190px;
+  min-height: 320px;
   resize: vertical;
   line-height: 1.55;
 }
 
 .compact-area textarea {
-  min-height: 150px;
+  min-height: 250px;
 }
 
 .toolbar {
