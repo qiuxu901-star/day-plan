@@ -146,6 +146,16 @@ body {
   color: var(--muted);
 }
 
+.choice-field {
+  justify-content: flex-start;
+}
+
+.choice-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 input,
 select,
 textarea,
@@ -233,6 +243,22 @@ button:hover {
 .ghost.danger {
   background: rgba(167, 63, 53, 0.1);
   color: var(--danger);
+}
+
+.choice-chip {
+  min-height: 68px;
+  min-width: 104px;
+  border: 1px solid rgba(41, 31, 18, 0.12);
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.choice-chip.active {
+  background: var(--brand);
+  color: #fff8f2;
+  border-color: rgba(190, 90, 43, 0.52);
+  box-shadow: 0 10px 24px rgba(190, 90, 43, 0.22);
 }
 
 .summary-line {

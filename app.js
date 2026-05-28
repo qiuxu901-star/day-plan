@@ -10,8 +10,8 @@ const elements = {
   connectBtn: document.getElementById("connect-btn"),
   refreshBtn: document.getElementById("refresh-btn"),
   createNextWeekBtn: document.getElementById("create-next-week-btn"),
-  weekSelect: document.getElementById("week-select"),
-  daySelect: document.getElementById("day-select"),
+  weekTabs: document.getElementById("week-tabs"),
+  dayTabs: document.getElementById("day-tabs"),
   previousSummary: document.getElementById("previous-summary"),
   status: document.getElementById("global-status"),
   carryNextUp: document.getElementById("carry-next-up"),
@@ -38,19 +38,8 @@ function bootstrap() {
   elements.connectBtn.addEventListener("click", connectAndLoad);
   elements.refreshBtn.addEventListener("click", () => loadPlan(""));
   elements.createNextWeekBtn.addEventListener("click", createNextWeek);
-  elements.weekSelect.addEventListener("change", () => {
-    state.weekPath = elements.weekSelect.value;
-    state.day = "";
-    clearDayFields();
-    setStatus("正在切换周文件…", "pending");
-    loadPlan("");
-  });
-  elements.daySelect.addEventListener("change", () => {
-    state.day = elements.daySelect.value;
-    clearDayFields();
-    setStatus(`正在切换到 ${state.day}…`, "pending");
-    loadPlan("");
-  });
+  elements.weekTabs.addEventListener("click", handleWeekTabClick);
+  elements.dayTabs.addEventListener("click", handleDayTabClick);
   elements.carryNextUp.addEventListener("click", () => loadPlan("next_up"));
   elements.carryMigrated.addEventListener("click", () => loadPlan("migrated"));
   elements.clearPriorities.addEventListener("click", () => {
@@ -68,8 +57,8 @@ async function connectAndLoad() {
   try {
     const payload = await apiFetch("/api/weeks");
     state.weeks = payload.weeks || [];
-    renderWeekOptions();
-    state.weekPath = state.weekPath || elements.weekSelect.value;
+    state.weekPath = state.weekPath || state.weeks[0]?.path || "";
+    renderWeekTabs();
     await loadPlan("");
   } catch (error) {
     setStatus(`连接失败：${error.message}`, "error");
@@ -78,7 +67,7 @@ async function connectAndLoad() {
 
 async function loadPlan(carry) {
   if (!state.weekPath) {
-    state.weekPath = elements.weekSelect.value;
+    state.weekPath = state.weeks[0]?.path || "";
   }
 
   if (!state.weekPath) {
@@ -88,7 +77,7 @@ async function loadPlan(carry) {
 
   const query = new URLSearchParams({
     wk: state.weekPath,
-    day: state.day || elements.daySelect.value || "",
+    day: state.day || "",
   });
   if (carry) {
     query.set("carry", carry);
@@ -176,28 +165,31 @@ async function createNextWeek() {
       body: { wk: state.weekPath },
     });
     state.weeks = payload.weeks || [];
-    state.weekPath = payload.weekPath;
+    state.weekPath = "";
     state.day = "";
-    renderWeekOptions();
+    renderWeekTabs();
     clearDayFields();
     await loadPlan("");
-    setStatus(`已新建 ${payload.weekId}，上周遗留已带入本周重点`, "ok");
+    setStatus(`已新建 ${payload.weekId}，当前仍停留在本周`, "ok");
   } catch (error) {
     setStatus(`新建下一周失败：${error.message}`, "error");
   }
 }
 
-function renderWeekOptions() {
-  elements.weekSelect.innerHTML = "";
-  state.weeks.forEach((week) => {
-    const option = document.createElement("option");
-    option.value = week.path;
-    option.textContent = week.label;
-    if (week.path === state.weekPath || (!state.weekPath && week === state.weeks[0])) {
-      option.selected = true;
+function renderWeekTabs() {
+  elements.weekTabs.innerHTML = "";
+  state.weeks.forEach((week, index) => {
+    if (!state.weekPath && index === 0) {
       state.weekPath = week.path;
     }
-    elements.weekSelect.appendChild(option);
+    elements.weekTabs.appendChild(
+      createChoiceButton({
+        active: week.path === state.weekPath,
+        label: week.label,
+        name: "week",
+        value: week.path,
+      }),
+    );
   });
 }
 
@@ -210,7 +202,7 @@ function renderWeek(week) {
 
 function renderDay(day) {
   state.day = day.activeDay;
-  renderDayOptions(day.availableDays, day.activeDay);
+  renderDayTabs(day.availableDays, day.activeDay);
   elements.previousSummary.textContent = `昨日参考（不会自动算作今天内容）：${day.previousSummary}`;
   elements.priorities.value = joinEntries(day.priorities);
   elements.inbox.value = joinEntries(day.inbox);
@@ -222,16 +214,17 @@ function renderDay(day) {
   setStatus(emptyDayStatus(day), isDayEmpty(day) ? "warn" : "ok");
 }
 
-function renderDayOptions(days, activeDay) {
-  elements.daySelect.innerHTML = "";
+function renderDayTabs(days, activeDay) {
+  elements.dayTabs.innerHTML = "";
   days.forEach((day) => {
-    const option = document.createElement("option");
-    option.value = day;
-    option.textContent = day;
-    if (day === activeDay) {
-      option.selected = true;
-    }
-    elements.daySelect.appendChild(option);
+    elements.dayTabs.appendChild(
+      createChoiceButton({
+        active: day === activeDay,
+        label: day,
+        name: "day",
+        value: day,
+      }),
+    );
   });
 }
 
@@ -266,6 +259,45 @@ function splitEntries(raw) {
 
 function joinEntries(items) {
   return (items || []).join("\n\n");
+}
+
+function createChoiceButton({ active, label, name, value }) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `choice-chip${active ? " active" : ""}`;
+  button.dataset.name = name;
+  button.dataset.value = value;
+  button.setAttribute("aria-pressed", active ? "true" : "false");
+  button.textContent = label;
+  return button;
+}
+
+function handleWeekTabClick(event) {
+  const button = event.target.closest("[data-name='week']");
+  if (!button || button.dataset.value === state.weekPath) {
+    return;
+  }
+  state.weekPath = button.dataset.value;
+  state.day = "";
+  renderWeekTabs();
+  clearDayFields();
+  setStatus("正在切换周文件…", "pending");
+  loadPlan("");
+}
+
+function handleDayTabClick(event) {
+  const button = event.target.closest("[data-name='day']");
+  if (!button || button.dataset.value === state.day) {
+    return;
+  }
+  state.day = button.dataset.value;
+  renderDayTabs(
+    Array.from(elements.dayTabs.querySelectorAll("[data-name='day']")).map((item) => item.dataset.value),
+    state.day,
+  );
+  clearDayFields();
+  setStatus(`正在切换到 ${state.day}…`, "pending");
+  loadPlan("");
 }
 
 function clearDayFields() {
