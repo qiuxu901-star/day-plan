@@ -248,13 +248,32 @@ async function apiFetch(path, options = {}) {
   }
 
   const response = await fetch(path, requestOptions);
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  const text = await response.text();
 
   if (!response.ok) {
-    const text = await response.text();
+    if (contentType.includes("application/json")) {
+      try {
+        const payload = text ? JSON.parse(text) : {};
+        throw new Error(payload.error || payload.message || `${response.status} ${response.statusText}`);
+      } catch (error) {
+        if (error instanceof Error && error.message) {
+          throw error;
+        }
+      }
+    }
     throw new Error(text || `${response.status} ${response.statusText}`);
   }
 
-  return response.json();
+  if (!contentType.includes("application/json")) {
+    throw new Error("服务返回了异常页面，请刷新后重试；如果持续失败，请检查本机 API 和 ngrok");
+  }
+
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error("服务返回了无法解析的数据，请刷新后重试");
+  }
 }
 
 function splitEntries(raw) {
