@@ -1,10 +1,18 @@
 import { emptyDayStatus, isDayEmpty } from "./day-state.js";
 import { buildWeekDateMap, formatWeekRange, normalizeDayLabel } from "./week-calendar.js";
 
+const AUTO_SAVE_INTERVAL_MS = 60 * 1000;
+
 const state = {
   weeks: [],
   weekPath: "",
   day: "",
+  hasLoadedPlan: false,
+  isHydrating: false,
+  isLoadingPlan: false,
+  isSaving: false,
+  weeklyDirty: false,
+  dailyDirty: false,
 };
 
 const elements = {
@@ -36,6 +44,7 @@ const elements = {
 bootstrap();
 
 function bootstrap() {
+  bindDirtyTracking();
   elements.connectBtn.addEventListener("click", connectAndLoad);
   elements.refreshBtn.addEventListener("click", () => loadPlan(""));
   elements.createNextWeekBtn.addEventListener("click", createNextWeek);
@@ -45,11 +54,45 @@ function bootstrap() {
   elements.carryMigrated.addEventListener("click", () => loadPlan("migrated"));
   elements.clearPriorities.addEventListener("click", () => {
     elements.priorities.value = "";
+    markDirty("daily");
     setStatus("今日重点已清空，别忘了保存", "warn");
   });
   elements.saveWeeklyBtn.addEventListener("click", saveWeekly);
   elements.saveDailyBtn.addEventListener("click", saveDaily);
+  window.setInterval(autoSaveTick, AUTO_SAVE_INTERVAL_MS);
   connectAndLoad();
+}
+
+function bindDirtyTracking() {
+  [
+    elements.weeklyFocus,
+    elements.mustDo,
+    elements.shouldProgress,
+    elements.backlog,
+  ].forEach((field) => field.addEventListener("input", () => markDirty("weekly")));
+
+  [
+    elements.priorities,
+    elements.inbox,
+    elements.completed,
+    elements.migrated,
+    elements.dropped,
+    elements.interruptions,
+    elements.nextUp,
+  ].forEach((field) => field.addEventListener("input", () => markDirty("daily")));
+}
+
+function markDirty(scope) {
+  if (state.isHydrating) {
+    return;
+  }
+
+  if (scope === "weekly") {
+    state.weeklyDirty = true;
+    return;
+  }
+
+  state.dailyDirty = true;
 }
 
 async function connectAndLoad() {
@@ -85,6 +128,7 @@ async function loadPlan(carry) {
   }
 
   setStatus("读取中…", "pending");
+  state.isLoadingPlan = true;
 
   try {
     const payload = await apiFetch(`/api/plan?${query.toString()}`);
@@ -93,19 +137,31 @@ async function loadPlan(carry) {
     renderWeek(payload.week);
     renderDay(payload.day);
     renderWeekTabs();
+    state.hasLoadedPlan = true;
     setStatus("已同步当前周内容", "ok");
   } catch (error) {
     setStatus(`读取失败：${error.message}`, "error");
+  } finally {
+    state.isLoadingPlan = false;
   }
 }
 
-async function saveWeekly() {
+async function saveWeekly(options = {}) {
   if (!state.weekPath) {
-    setStatus("先选择周文件", "error");
+    if (!options.silent) {
+      setStatus("先选择周文件", "error");
+    }
     return;
   }
 
-  setStatus("保存周计划中…", "pending");
+  if (state.isSaving) {
+    return;
+  }
+
+  state.isSaving = true;
+  if (!options.silent) {
+    setStatus("保存周计划中…", "pending");
+  }
 
   try {
     await apiFetch("/api/save/weekly", {
@@ -118,19 +174,34 @@ async function saveWeekly() {
         backlog: splitEntries(elements.backlog.value),
       },
     });
-    setStatus("周计划已写回 Obsidian", "ok");
+    state.weeklyDirty = false;
+    if (!options.silent) {
+      setStatus("周计划已写回 Obsidian", "ok");
+    }
   } catch (error) {
     setStatus(`周计划保存失败：${error.message}`, "error");
+    throw error;
+  } finally {
+    state.isSaving = false;
   }
 }
 
-async function saveDaily() {
+async function saveDaily(options = {}) {
   if (!state.weekPath || !state.day) {
-    setStatus("先选择周文件和日期", "error");
+    if (!options.silent) {
+      setStatus("先选择周文件和日期", "error");
+    }
     return;
   }
 
-  setStatus("保存日计划中…", "pending");
+  if (state.isSaving) {
+    return;
+  }
+
+  state.isSaving = true;
+  if (!options.silent) {
+    setStatus("保存日计划中…", "pending");
+  }
 
   try {
     await apiFetch("/api/save/daily", {
@@ -147,9 +218,15 @@ async function saveDaily() {
         nextUp: splitEntries(elements.nextUp.value),
       },
     });
-    setStatus("日计划已写回 Obsidian", "ok");
+    state.dailyDirty = false;
+    if (!options.silent) {
+      setStatus("日计划已写回 Obsidian", "ok");
+    }
   } catch (error) {
     setStatus(`日计划保存失败：${error.message}`, "error");
+    throw error;
+  } finally {
+    state.isSaving = false;
   }
 }
 
@@ -198,13 +275,17 @@ function renderWeekTabs() {
 }
 
 function renderWeek(week) {
+  state.isHydrating = true;
   elements.weeklyFocus.value = joinEntries(week.weeklyFocus);
   elements.mustDo.value = joinEntries(week.mustDo);
   elements.shouldProgress.value = joinEntries(week.shouldProgress);
   elements.backlog.value = joinEntries(week.backlog);
+  state.weeklyDirty = false;
+  state.isHydrating = false;
 }
 
 function renderDay(day) {
+  state.isHydrating = true;
   state.day = day.activeDay;
   renderDayTabs(day.availableDays, day.activeDay);
   elements.previousSummary.textContent = `昨日参考（不会自动算作今天内容）：${day.previousSummary}`;
@@ -215,6 +296,8 @@ function renderDay(day) {
   elements.dropped.value = joinEntries(day.dropped);
   elements.interruptions.value = joinEntries(day.interruptions);
   elements.nextUp.value = joinEntries(day.nextUp);
+  state.dailyDirty = false;
+  state.isHydrating = false;
   setStatus(emptyDayStatus(day), isDayEmpty(day) ? "warn" : "ok");
 }
 
@@ -340,6 +423,7 @@ function handleDayTabClick(event) {
 }
 
 function clearDayFields() {
+  state.isHydrating = true;
   elements.priorities.value = "";
   elements.inbox.value = "";
   elements.completed.value = "";
@@ -348,6 +432,8 @@ function clearDayFields() {
   elements.interruptions.value = "";
   elements.nextUp.value = "";
   elements.previousSummary.textContent = "昨日参考（不会自动算作今天内容）：加载中…";
+  state.dailyDirty = false;
+  state.isHydrating = false;
 }
 
 function setStatus(message, tone) {
@@ -358,4 +444,26 @@ function setStatus(message, tone) {
 function activeWeekId() {
   const activeWeek = state.weeks.find((week) => week.path === state.weekPath);
   return activeWeek?.weekId || activeWeek?.label || "";
+}
+
+async function autoSaveTick() {
+  if (!state.hasLoadedPlan || state.isHydrating || state.isLoadingPlan || state.isSaving) {
+    return;
+  }
+
+  if (!state.weeklyDirty && !state.dailyDirty) {
+    return;
+  }
+
+  try {
+    if (state.weeklyDirty) {
+      await saveWeekly({ silent: true });
+    }
+    if (state.dailyDirty) {
+      await saveDaily({ silent: true });
+    }
+    setStatus(`已自动保存 ${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`, "ok");
+  } catch {
+    // saveWeekly/saveDaily already surfaces the error state
+  }
 }
