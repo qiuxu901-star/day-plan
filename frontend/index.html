@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day Plan</title><link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<main class="shell" id="app">
+
+<section class="hero">
+  <p class="eyebrow">Day Plan</p>
+  <h1>一个入口，收住每周方向和每天动作</h1>
+  <p class="subtitle">最少点击 · 逐条操作 · 昨日继承 · 周任务联动</p>
+</section>
+
+<!-- Toast -->
+<div v-if="toast" style="position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999;background:var(--text);color:#fff;padding:12px 24px;border-radius:999px;font-weight:700;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.15);">{{ toast }}</div>
+
+<!-- ═══ 周导航 ═══ -->
+<section class="panel" style="padding:14px 20px;">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <button class="secondary" @click="shiftWeek(-1)" style="padding:8px 14px;">◀</button>
+    <button v-for="w in weekOpts" :key="w.key"
+      :class="['choice-chip','compact',{active:wk===w.key}]"
+      @click="switchWeek(w.key)"><span class="choice-chip-label">{{ w.key }}</span></button>
+    <button class="secondary" @click="shiftWeek(1)" style="padding:8px 14px;">▶</button>
+    <span style="flex:1;"></span>
+    <button class="secondary" @click="createNext" style="font-size:12px;">+新增周</button>
+  </div>
+</section>
+
+<!-- ═══ 周计划 ═══ -->
+<section class="panel weekly-panel">
+  <div class="panel-head">
+    <div><p class="panel-kicker">周计划 · 方向</p><h2>先把本周方向定住</h2></div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <span v-if="weekSaved" style="color:var(--mint);font-size:12px;font-weight:700;">已保存</span>
+      <button class="primary" @click="saveWeek" :disabled="savingWeek">{{ savingWeek?'...':'保存' }}</button>
+    </div>
+  </div>
+  <div class="two-col">
+    <label class="field area"><span>本周主线</span><textarea v-model="w.本周主线" placeholder="每条一行。不是任务清单，是方向。"></textarea></label>
+    <label class="field area"><span>本周必须完成</span><textarea v-model="w.本周必须完成" placeholder="每条一行。"></textarea></label>
+    <label class="field area"><span>本周推进即可</span><textarea v-model="w.本周推进即可" placeholder="每条一行。"></textarea></label>
+    <label class="field area"><span>临时进入</span><textarea v-model="w.临时进入" placeholder="新任务缓冲区。"></textarea></label>
+  </div>
+  <div v-if="w.临时进入.trim()" style="margin-top:12px;">
+    <button class="ghost" @click="promoteTempToTasks" style="font-size:12px;">📦 将「临时进入」批量创建为周任务</button>
+  </div>
+</section>
+
+<!-- ═══ 日期导航 ═══ -->
+<div class="choice-tabs" style="margin:18px 0 14px;">
+  <button v-for="d in weekDays" :key="d.date"
+    :class="['choice-chip','mini',{active:day===d.date}]"
+    @click="day=d.date;loadDay();loadYesterdayRef()"
+    :style="d.today ? 'border:2px solid var(--brand);' : ''">
+    <span class="choice-chip-label">{{ d.label }}<span v-if="d.today" style="font-size:10px;color:var(--brand);"> 今天</span></span>
+    <span class="choice-chip-meta">{{ d.date.slice(5) }}</span>
+  </button>
+</div>
+
+<!-- ═══ 昨日参考 ═══ -->
+<section class="panel" v-if="yesterdayRef!=='无记录'&&yesterdayRef!=='加载中...'" style="padding:16px 20px;margin-bottom:14px;border-left:3px solid var(--mint);">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <span style="font-size:13px;color:var(--muted);flex:1;">💬 昨日参考：{{ yesterdayRef }}</span>
+    <button class="ghost" @click="inheritYesterday">📥 一键继承到今日</button>
+  </div>
+</section>
+
+<!-- ═══ 周任务池 ═══ -->
+<section class="panel" style="padding:16px 20px;margin-bottom:14px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <span style="font-size:13px;font-weight:700;color:var(--muted);">📦 周任务池（点击文字 → 加入今日重点）</span>
+    <button class="primary" @click="showTask=!showTask" style="font-size:12px;padding:6px 12px;">{{ showTask?'取消':'+ 添加' }}</button>
+  </div>
+  <div v-if="tasks.length" style="display:flex;flex-wrap:wrap;gap:6px;">
+    <div v-for="t in tasks" :key="t.record_id" style="display:flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,0.6);">
+      <input type="checkbox" :checked="t.完成状态" @change="toggleTask(t)" style="width:18px;height:18px;min-height:0;" />
+      <span :style="{fontSize:'13px',textDecoration:t.完成状态?'line-through':'none',opacity:t.完成状态?0.4:1,cursor:'pointer'}" @click="addTaskToFocus(t.任务内容)">{{ t.任务内容 }}</span>
+      <button class="ghost danger" style="padding:2px 6px;font-size:11px;" @click="delTask(t.record_id)">✕</button>
+    </div>
+  </div>
+  <div v-if="showTask" class="toolbar" style="margin-top:8px;">
+    <input v-model="tc" placeholder="任务..." style="flex:1;min-height:42px;" @keyup.enter="addTask" />
+    <select v-model="tt" style="width:auto;min-height:42px;"><option>必须完成</option><option>推进即可</option><option>临时进入</option></select>
+    <button class="primary" @click="addTask" style="font-size:13px;">添加</button>
+  </div>
+  <p v-if="!tasks.length&&!showTask" class="subtitle" style="text-align:center;font-size:12px;color:var(--muted);">暂无周任务</p>
+</section>
+
+<!-- ═══ 今日重点 ═══ -->
+<section class="panel daily-panel">
+  <div class="panel-head">
+    <div><p class="panel-kicker">日计划 · 重点</p><h2>把今天要做的事填清楚</h2></div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <span v-if="daySaved" style="color:var(--mint);font-size:12px;font-weight:700;">已保存</span>
+      <button class="primary" @click="saveDay" :disabled="savingDay">{{ savingDay?'...':'保存' }}</button>
+    </div>
+  </div>
+
+  <div style="margin-bottom:16px;">
+    <span style="font-size:13px;font-weight:700;color:var(--muted);">🎯 今日重点</span>
+    <div v-for="(item,i) in focus" :key="'f'+i" class="item-line">
+      <input v-model="focus[i]" @blur="saveDayDebounced" @keyup.enter="$event.target.blur()" :placeholder="'重点 '+(i+1)" />
+      <button class="btn-act" @click="moveFocus(i,'done')" title="完成">✓</button>
+      <button class="btn-act" @click="moveFocus(i,'migrated')" title="迁移">→</button>
+      <button class="btn-act btn-act-del" @click="focus.splice(i,1);saveDay()" title="放弃">✕</button>
+    </div>
+    <button class="btn-add" @click="focus.push('');saveDay()">+ 添加重点</button>
+  </div>
+
+  <div>
+    <span style="font-size:13px;font-weight:700;color:var(--muted);">⚠️ 临时插入</span>
+    <div v-for="(item,i) in temp" :key="'t'+i" class="item-line">
+      <input v-model="temp[i]" @blur="saveDayDebounced" @keyup.enter="$event.target.blur()" placeholder="临时事项" />
+      <button class="btn-act btn-act-del" @click="temp.splice(i,1);saveDay()">✕</button>
+    </div>
+    <button class="btn-add" @click="temp.push('');saveDay()">+ 添加</button>
+  </div>
+</section>
+
+<!-- ═══ 收尾 ═══ -->
+<section class="panel daily-review-panel">
+  <div class="panel-head">
+    <div><p class="panel-kicker">日复盘 · 收尾</p><h2>记录成果与阻碍</h2></div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <span v-if="closed" class="status-pill" data-tone="ok">已收尾</span>
+      <button v-else class="ghost" @click="quickClose" :disabled="closing">{{ closing?'...':'🚀 一键收尾' }}</button>
+      <button class="primary" @click="saveDay" :disabled="savingDay">保存</button>
+    </div>
+  </div>
+
+  <div class="four-col">
+    <div>
+      <span style="font-size:13px;font-weight:700;color:var(--muted);display:block;margin-bottom:6px;">✅ 完成</span>
+      <div v-for="(item,i) in doneItems" :key="'d'+i" class="item-line">
+        <input v-model="doneItems[i]" @blur="saveDayDebounced" placeholder="完成" />
+        <button class="btn-act btn-act-del" @click="doneItems.splice(i,1);saveDay()">✕</button>
+      </div>
+      <button class="btn-add" @click="doneItems.push('');saveDay()">+</button>
+    </div>
+    <div>
+      <span style="font-size:13px;font-weight:700;color:var(--muted);display:block;margin-bottom:6px;">➡️ 迁移</span>
+      <div v-for="(item,i) in migItems" :key="'m'+i" class="item-line">
+        <input v-model="migItems[i]" @blur="saveDayDebounced" placeholder="迁移" />
+        <button class="btn-act btn-act-del" @click="migItems.splice(i,1);saveDay()">✕</button>
+      </div>
+      <button class="btn-add" @click="migItems.push('');saveDay()">+</button>
+    </div>
+    <div>
+      <span style="font-size:13px;font-weight:700;color:var(--muted);display:block;margin-bottom:6px;">❌ 搁置/放弃</span>
+      <div v-for="(item,i) in dropItems" :key="'x'+i" class="item-line">
+        <input v-model="dropItems[i]" @blur="saveDayDebounced" placeholder="放弃" />
+        <button class="btn-act btn-act-del" @click="dropItems.splice(i,1);saveDay()">✕</button>
+      </div>
+      <button class="btn-add" @click="dropItems.push('');saveDay()">+</button>
+    </div>
+    <div>
+      <span style="font-size:13px;font-weight:700;color:var(--muted);display:block;margin-bottom:6px;">⚠️ 主要打断</span>
+      <textarea v-model="interrupt" @blur="saveDayDebounced" rows="3" placeholder="打断原因"></textarea>
+    </div>
+  </div>
+
+  <div style="margin-top:14px;">
+    <span style="font-size:13px;font-weight:700;color:var(--muted);">📌 明日优先</span>
+    <div v-for="(item,i) in next" :key="'n'+i" class="item-line">
+      <input v-model="next[i]" @blur="saveDayDebounced" @keyup.enter="$event.target.blur()" placeholder="明天" />
+      <button class="btn-act btn-act-del" @click="next.splice(i,1);saveDay()">✕</button>
+    </div>
+    <button class="btn-add" @click="next.push('');saveDay()">+ 添加</button>
+  </div>
+</section>
+
+<!-- ═══ 周复盘 ═══ -->
+<section class="panel review-panel">
+  <div class="panel-head"><div><p class="panel-kicker">周复盘</p><h2>{{ wk }} 回顾</h2></div></div>
+  <div class="choice-tabs" style="margin-bottom:14px;">
+    <button :class="['choice-chip','mini',{active:revTab==='days'}]" @click="revTab='days';loadDayRecords()"><span class="choice-chip-label">📋 日记录</span></button>
+    <button :class="['choice-chip','mini',{active:revTab==='summary'}]" @click="revTab='summary'"><span class="choice-chip-label">📊 周总结</span></button>
+  </div>
+
+  <div v-if="revTab==='days'">
+    <div v-if="dayRecords.length" style="display:flex;flex-direction:column;gap:14px;">
+      <div v-for="r in dayRecords" :key="r.wd" style="padding:14px;border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,0.5);">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><strong>{{ r.wd }}</strong><span v-if="r.closed" class="status-pill" data-tone="ok" style="font-size:11px;">已收尾</span></div>
+        <div v-if="r.done" style="font-size:14px;margin-bottom:2px;">✅ {{ r.done }}</div>
+        <div v-if="r.mig" style="font-size:14px;margin-bottom:2px;">➡️ {{ r.mig }}</div>
+        <div v-if="r.intr" style="font-size:14px;">⚠️ {{ r.intr }}</div>
+        <div v-if="!r.done&&!r.mig&&!r.intr" style="font-size:13px;color:var(--muted);">暂无记录</div>
+      </div>
+    </div>
+    <p v-else class="subtitle" style="text-align:center;padding:20px;">暂无日记录</p>
+  </div>
+
+  <div v-if="revTab==='summary'">
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <button class="ghost" @click="genReview" :disabled="genBusy">🪄 自动生成</button>
+      <button class="primary" @click="saveReview" :disabled="saveBusy">💾 保存</button>
+      <button class="secondary" @click="exportWeek">📥 导出</button>
+    </div>
+    <p v-if="revSaved" style="color:var(--mint);">✅ 已保存</p>
+    <label class="field area"><textarea v-model="reviewText" placeholder="点击「自动生成」汇总。"></textarea></label>
+  </div>
+</section>
+
+</main>
+
+<script src="vendor/vue.global.prod.js"></script>
+<script>
+const A='/api',$={get:async u=>{const r=await fetch(A+u);return r.json()},post:async(u,b)=>{const r=await fetch(A+u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return r.json()},put:async(u,b)=>{const r=await fetch(A+u,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return r.json()},del:async u=>{const r=await fetch(A+u,{method:'DELETE'});return r.json()}}
+function ts(){return new Date().toISOString().split('T')[0]}
+function wkKey(d){d=new Date(d);const n=d.getUTCDay()||7;d.setUTCDate(d.getUTCDate()+4-n);const ys=new Date(Date.UTC(d.getUTCFullYear(),0,1));return'WK'+Math.ceil((((d-ys)/86400000)+1)/7)}
+function wkDays(){const t=new Date(),m=new Date(t),dow=m.getDay();m.setDate(m.getDate()+(dow===0?-6:1-dow));return Array.from({length:7},(_,i)=>{const d=new Date(m);d.setDate(d.getDate()+i);const s=d.toISOString().split('T')[0];return{date:s,label:['周一','周二','周三','周四','周五','周六','周日'][i],today:s===ts()}})}
+function split(s){return(s||'').split('\n').filter(l=>l.trim())}
+function join(a){return a.filter(s=>s.trim()).join('\n')}
+
+Vue.createApp({data(){return{
+  wk:wkKey(new Date()),day:ts(),w:{本周主线:'',本周必须完成:'',本周推进即可:'',临时进入:''},
+  focus:[''],temp:[],doneItems:[],migItems:[],dropItems:[],interrupt:'',next:[''],closed:false,
+  tasks:[],reviewText:'',revTab:'days',dayRecords:[],weekOpts:[],yesterdayRef:'加载中...',
+  savingWeek:false,savingDay:false,weekSaved:false,daySaved:false,
+  closing:false,genBusy:false,saveBusy:false,revSaved:false,
+  showTask:false,tc:'',tt:'必须完成',st:null,toast:''
+}},computed:{weekDays(){return wkDays()}},
+async mounted(){await this.refreshOpts();await this.loadAll()},
+methods:{
+  async refreshOpts(){try{const r=await $.get('/weeks?page_size=50');if(r.code===0&&r.data?.items){const all=r.data.items.map(w=>w.key);const cur=this.wk;const num=parseInt(cur.replace('WK',''));const want=[];for(let i=num-2;i<=num+2;i++){const k='WK'+i;if(!want.find(w=>w.key===k))want.push({key:k,label:all.includes(k)?(r.data.items.find(w=>w['周次']===k)||{}).状态||'':''})};this.weekOpts=want}}catch(e){} },
+  async switchWeek(k){this.wk=k;this.w={本周主线:'',本周必须完成:'',本周推进即可:'',临时进入:''};this.tasks=[];this.reviewText='';this.revTab='days';await this.loadAll()},
+  async loadAll(){await Promise.all([this.loadWeek(),this.loadTasks(),this.loadReview()]);const ds=this.weekDays;this.day=ds.find(d=>d.today)?.date||ds[0].date;await this.loadDay();await this.loadYesterdayRef();await this.refreshOpts()},
+  async shiftWeek(d){const cur=this.weekOpts.findIndex(w=>w.key===this.wk);const nxt=this.weekOpts[cur+d];if(nxt)this.switchWeek(nxt.key)},
+
+  async loadWeek(){try{const r=await $.get('/weeks/'+this.wk);if(r.code===0&&r.data)Object.assign(this.w,{本周主线:r.data['本周主线']||'',本周必须完成:r.data['本周必须完成']||'',本周推进即可:r.data['本周推进即可']||'',临时进入:r.data['临时进入']||''})}catch(e){} },
+  async saveWeek(){this.savingWeek=true;this.weekSaved=false;try{await $.put('/weeks/'+this.wk,this.w);this.weekSaved=true;setTimeout(()=>this.weekSaved=false,2000)}catch(e){};this.savingWeek=false},
+  async promoteTempToTasks(){const lines=split(this.w.临时进入);if(!lines.length)return;for(const l of lines){try{await $.post('/weeks/'+this.wk+'/tasks',{content:l,task_type:'临时进入'})}catch(e){}};await this.loadTasks();this.toast='📦 已批量创建为周任务';setTimeout(()=>this.toast='',1500)},
+
+  async loadDay(){this.focus=[''];this.temp=[];this.doneItems=[];this.migItems=[];this.dropItems=[];this.interrupt='';this.next=[''];this.closed=false
+    try{const r=await $.get('/weeks/'+this.wk+'/days/'+this.day);if(r.code===0&&r.data){const f=r.data;this.focus=split(f['今日重点']);this.temp=split(f['临时插入']);this.doneItems=split(f['收尾_完成']);this.migItems=split(f['收尾_迁移']);this.dropItems=split(f['收尾_搁置放弃']);this.interrupt=f['主要打断']||'';this.next=split(f['明日优先']);this.closed=f['收尾状态']==='已收尾'}
+    if(!this.focus.length)this.focus=[''];if(!this.next.length)this.next=['']}catch(e){}},
+  saveDayDebounced(){clearTimeout(this.st);this.st=setTimeout(()=>this.saveDay(),400)},
+  async saveDay(){this.savingDay=true;this.daySaved=false
+    try{await $.put('/weeks/'+this.wk+'/days/'+this.day,{今日重点:join(this.focus),临时插入:join(this.temp),收尾_完成:join(this.doneItems),收尾_迁移:join(this.migItems),收尾_搁置放弃:join(this.dropItems),主要打断:this.interrupt,明日优先:join(this.next)});this.daySaved=true;setTimeout(()=>this.daySaved=false,2000)}catch(e){};this.savingDay=false},
+
+  moveFocus(i,target){const item=this.focus[i];if(!item.trim())return;this.focus.splice(i,1);if(!this.focus.length)this.focus=['']
+    if(target==='done'){this.doneItems.push(item);this.toast='✅ 已归入完成区'}
+    else if(target==='migrated'){this.migItems.push(item);this.toast='➡️ 已归入迁移区'}
+    this.saveDay();setTimeout(()=>this.toast='',1500)},
+  async quickClose(){this.closing=true;try{const remain=this.focus.filter(s=>s.trim());if(remain.length){this.doneItems.push(...remain);this.focus=['']}
+    await this.saveDay();const r=await $.post('/weeks/'+this.wk+'/days/'+this.day+'/close');if(r.code===0)this.closed=true}catch(e){};this.closing=false},
+
+  async loadYesterdayRef(){const d=new Date(this.day);d.setDate(d.getDate()-1);const yd=d.toISOString().split('T')[0]
+    try{const r=await $.get('/weeks/'+this.wk+'/days/'+yd);if(r.code===0&&r.data){const f=r.data,p=[];if(f['明日优先'])p.push('明日:'+f['明日优先'].replace(/\n/g,' | '));if(f['收尾_完成'])p.push('完成:'+f['收尾_完成'].split('\n')[0]);this.yesterdayRef=p.join(' ； ')||'无记录'}else this.yesterdayRef='无记录'}catch(e){this.yesterdayRef='无记录'}},
+  async inheritYesterday(){const d=new Date(this.day);d.setDate(d.getDate()-1);const yd=d.toISOString().split('T')[0]
+    try{const r=await $.get('/weeks/'+this.wk+'/days/'+yd);if(r.code===0&&r.data){const f=r.data
+      if(f['明日优先']){const items=split(f['明日优先']);for(const item of items){if(item.trim()&&!this.focus.includes(item)){if(this.focus[0]==='')this.focus[0]=item;else this.focus.push(item)}}}
+      if(f['收尾_迁移']){const items=split(f['收尾_迁移']);for(const item of items){if(item.trim()&&!this.focus.includes(item))this.focus.push(item)}}
+      if(this.focus[0]==='')this.focus=[''];this.saveDay();this.toast='📥 已继承昨日';setTimeout(()=>this.toast='',1500)}}catch(e){}},
+
+  async loadTasks(){try{const r=await $.get('/weeks/'+this.wk+'/tasks');if(r.code===0)this.tasks=r.data||[]}catch(e){} },
+  async toggleTask(t){t['完成状态']=!t['完成状态'];await $.put('/weeks/'+this.wk+'/tasks/'+t.record_id,{'完成状态':t['完成状态']})},
+  async addTask(){if(!this.tc.trim())return;await $.post('/weeks/'+this.wk+'/tasks',{content:this.tc.trim(),task_type:this.tt});this.tc='';this.showTask=false;await this.loadTasks()},
+  async delTask(id){await $.del('/weeks/'+this.wk+'/tasks/'+id);await this.loadTasks()},
+  addTaskToFocus(text){if(!this.focus.includes(text)){if(this.focus[0]==='')this.focus[0]=text;else this.focus.push(text);this.saveDay()}},
+
+  async loadDayRecords(){try{const r=await $.get('/weeks/'+this.wk+'/days');if(r.code===0&&r.data)this.dayRecords=r.data.map(d=>({wd:d['星期']||'',closed:d['收尾状态']==='已收尾',done:d['收尾_完成']?.replace(/\n/g,' | '),mig:d['收尾_迁移']?.replace(/\n/g,' | '),intr:d['主要打断']?.replace(/\n/g,' | ')}))}catch(e){this.dayRecords=[]}},
+  async loadReview(){try{const r=await $.get('/weeks/'+this.wk);if(r.code===0&&r.data?.['本周总结'])this.reviewText=r.data['本周总结']}catch(e){}},
+  async genReview(){this.genBusy=true;try{const[dr,wr]=await Promise.all([$.get('/weeks/'+this.wk+'/days'),$.get('/weeks/'+this.wk)]);const days=dr.code===0?(dr.data||[]):[],week=wr.code===0?(wr.data||{}):{},L=[];if(week['本周主线'])L.push('## 本周主线\n'+week['本周主线']);L.push('## 每日完成');for(const d of days){if(d['收尾_完成']?.trim())L.push(d['星期']+'：'+d['收尾_完成'].trim().replace(/\n/g,'；'))}const ints=days.filter(d=>d['主要打断']?.trim()).map(d=>d['星期']+'：'+d['主要打断'].trim().replace(/\n/g,'；'));if(ints.length)L.push('## 风险与打断\n'+ints.join('\n'));const ns=days.filter(d=>d['明日优先']?.trim()).map(d=>d['星期']+'：'+d['明日优先'].trim().replace(/\n/g,'；'));const ms=days.filter(d=>d['收尾_迁移']?.trim()).map(d=>d['星期']+'迁移：'+d['收尾_迁移'].trim().replace(/\n/g,'；'));if(ns.length||ms.length)L.push('## 下周计划\n'+[...ns,...ms].join('\n'));this.reviewText=L.join('\n\n')}catch(e){};this.genBusy=false},
+  async saveReview(){this.saveBusy=true;await $.put('/weeks/'+this.wk,{'本周总结':this.reviewText});this.revSaved=true;this.saveBusy=false;setTimeout(()=>this.revSaved=false,3000)},
+  exportWeek(){window.open('/api/weeks/'+this.wk+'/export','_blank')},
+  async createNext(){const d=new Date();d.setDate(d.getDate()+7);const n=wkKey(d);try{await $.get('/weeks/'+n)}catch(e){};await this.refreshOpts();this.switchWeek(n)},
+}}).mount('#app')
+</script>
+</body>
+</html>

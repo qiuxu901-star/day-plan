@@ -1,0 +1,7 @@
+fastapi>=0.100.0,<0.104.0
+uvicorn[standard]>=0.22.0,<0.24.0
+lark-oapi>=1.2.0
+python-dotenv>=0.21.0,<1.0.0
+jinja2>=3.1.0,<3.2.0
+httpx>=0.24.0,<0.25.0
+pydantic>=1.10.0,<2.0.0
