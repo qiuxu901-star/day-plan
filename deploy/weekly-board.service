@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=www-data
+User=root
 WorkingDirectory=/opt/weekly-board
 EnvironmentFile=/opt/weekly-board/.env
 ExecStart=/opt/weekly-board/venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
