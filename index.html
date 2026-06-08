@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Day Plan</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <p class="eyebrow">Day Plan</p>
+      <h1>一个入口，收住每周方向和每天动作</h1>
+      <p class="subtitle">Vercel 单页只负责输入，本机服务继续把数据写回你的 Obsidian `WK` 文件。</p>
+    </section>
+
+    <section class="panel settings-panel">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">服务状态</p>
+          <h2>页面会自动连接你的写回服务</h2>
+        </div>
+        <div id="global-status" class="status-pill">等待连接</div>
+      </div>
+
+      <p class="subtitle compact-subtitle">如果本机 API 和 ngrok 正在运行，页面会在打开时自动加载，不需要再手动填写连接参数。</p>
+
+      <div class="toolbar">
+        <button id="connect-btn" class="primary">重新连接</button>
+        <button id="refresh-btn" class="secondary">刷新当前周</button>
+      </div>
+    </section>
+
+    <section class="panel controller-panel">
+      <div class="control-grid">
+        <div class="field choice-field">
+          <span>最近 3 个周文件</span>
+          <div id="week-tabs" class="choice-tabs" aria-label="周文件选择"></div>
+        </div>
+        <div class="field choice-field">
+          <span>当前日期</span>
+          <div id="day-tabs" class="choice-tabs" aria-label="日期选择"></div>
+        </div>
+      </div>
+
+      <div class="toolbar compact">
+        <button id="create-next-week-btn" class="secondary">新增周</button>
+        <button id="carry-next-up" class="ghost">昨日明日优先 -> 今天今日重点</button>
+        <button id="carry-migrated" class="ghost">昨日迁移项 -> 今天今日重点</button>
+        <button id="clear-priorities" class="ghost danger">清空今天今日重点</button>
+      </div>
+
+      <p id="previous-summary" class="summary-line">昨日参考：尚未加载</p>
+    </section>
+
+    <section class="panel weekly-panel">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">周计划</p>
+          <h2>先把本周方向定住</h2>
+        </div>
+        <button id="save-weekly-btn" class="primary">保存周计划</button>
+      </div>
+
+      <div class="two-col">
+        <label class="field area">
+          <span>本周主线</span>
+          <textarea id="weekly-focus" placeholder="每条之间空一行。每条可用第二行补充目标。"></textarea>
+        </label>
+        <label class="field area">
+          <span>本周必须完成</span>
+          <textarea id="must-do" placeholder="每条之间空一行。"></textarea>
+        </label>
+        <label class="field area">
+          <span>本周推进即可</span>
+          <textarea id="should-progress" placeholder="每条之间空一行。"></textarea>
+        </label>
+        <label class="field area">
+          <span>临时进入</span>
+          <textarea id="backlog" placeholder="每条之间空一行。"></textarea>
+        </label>
+      </div>
+    </section>
+
+    <section class="panel daily-panel">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">日计划</p>
+          <h2>把今天真正要做的事填清楚</h2>
+        </div>
+        <button id="save-daily-btn" class="primary">保存日计划</button>
+      </div>
+
+      <div class="two-col">
+        <label class="field area">
+          <span>今日重点</span>
+          <textarea id="priorities" placeholder="每条之间空一行。条目内第二行可写目标说明。"></textarea>
+        </label>
+        <label class="field area">
+          <span>临时插入</span>
+          <textarea id="inbox" placeholder="每条之间空一行。"></textarea>
+        </label>
+      </div>
+
+      <div class="four-col">
+        <label class="field area compact-area">
+          <span>完成</span>
+          <textarea id="completed" placeholder="每条之间空一行。"></textarea>
+        </label>
+        <label class="field area compact-area">
+          <span>迁移</span>
+          <textarea id="migrated" placeholder="可在第二行写原因。"></textarea>
+        </label>
+        <label class="field area compact-area">
+          <span>搁置 / 放弃</span>
+          <textarea id="dropped" placeholder="每条之间空一行。"></textarea>
+        </label>
+        <label class="field area compact-area">
+          <span>主要打断</span>
+          <textarea id="interruptions" placeholder="每条之间空一行。"></textarea>
+        </label>
+      </div>
+
+      <label class="field area">
+        <span>明日优先</span>
+        <textarea id="next-up" placeholder="每条之间空一行。"></textarea>
+      </label>
+    </section>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
