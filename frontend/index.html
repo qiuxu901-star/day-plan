@@ -39,10 +39,10 @@
     </div>
   </div>
   <div class="two-col">
-    <label class="field area"><span>本周主线</span><textarea v-model="w.本周主线" placeholder="每条一行。不是任务清单，是方向。"></textarea></label>
-    <label class="field area"><span>本周必须完成</span><textarea v-model="w.本周必须完成" placeholder="每条一行。"></textarea></label>
-    <label class="field area"><span>本周推进即可</span><textarea v-model="w.本周推进即可" placeholder="每条一行。"></textarea></label>
-    <label class="field area"><span>临时进入</span><textarea v-model="w.临时进入" placeholder="新任务缓冲区。"></textarea></label>
+    <label class="field area"><span>本周主线</span><textarea v-model="w.本周主线" @blur="saveWeekDebounced" placeholder="每条一行。不是任务清单，是方向。"></textarea></label>
+    <label class="field area"><span>本周必须完成</span><textarea v-model="w.本周必须完成" @blur="saveWeekDebounced" placeholder="每条一行。"></textarea></label>
+    <label class="field area"><span>本周推进即可</span><textarea v-model="w.本周推进即可" @blur="saveWeekDebounced" placeholder="每条一行。"></textarea></label>
+    <label class="field area"><span>临时进入</span><textarea v-model="w.临时进入" @blur="saveWeekDebounced" placeholder="新任务缓冲区。"></textarea></label>
   </div>
   <div v-if="w.临时进入.trim()" style="margin-top:12px;">
     <button class="ghost" @click="promoteTempToTasks" style="font-size:12px;">📦 将「临时进入」批量创建为周任务</button>
@@ -71,7 +71,7 @@
 <!-- ═══ 周任务池 ═══ -->
 <section class="panel" style="padding:16px 20px;margin-bottom:14px;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-    <span style="font-size:13px;font-weight:700;color:var(--muted);">📦 周任务池（点击文字 → 加入今日重点）</span>
+    <span style="font-size:13px;font-weight:700;color:var(--muted);">📦 周任务池 · 本周所有任务，点击任务文字即可加入今日重点</span>
     <button class="primary" @click="showTask=!showTask" style="font-size:12px;padding:6px 12px;">{{ showTask?'取消':'+ 添加' }}</button>
   </div>
   <div v-if="tasks.length" style="display:flex;flex-wrap:wrap;gap:6px;">
@@ -86,7 +86,7 @@
     <select v-model="tt" style="width:auto;min-height:42px;"><option>必须完成</option><option>推进即可</option><option>临时进入</option></select>
     <button class="primary" @click="addTask" style="font-size:13px;">添加</button>
   </div>
-  <p v-if="!tasks.length&&!showTask" class="subtitle" style="text-align:center;font-size:12px;color:var(--muted);">暂无周任务</p>
+  <p v-if="!tasks.length&&!showTask" class="subtitle" style="text-align:center;font-size:12px;color:var(--muted);">在「周计划」中定义任务后，这里会出现本周任务池。勾选=标记完成，点击文字=加入今日重点</p>
 </section>
 
 <!-- ═══ 今日重点 ═══ -->
@@ -103,9 +103,9 @@
     <span style="font-size:13px;font-weight:700;color:var(--muted);">🎯 今日重点</span>
     <div v-for="(item,i) in focus" :key="'f'+i" class="item-line">
       <input v-model="focus[i]" @blur="saveDayDebounced" @keyup.enter="$event.target.blur()" :placeholder="'重点 '+(i+1)" />
-      <button class="btn-act" @click="moveFocus(i,'done')" title="完成">✓</button>
-      <button class="btn-act" @click="moveFocus(i,'migrated')" title="迁移">→</button>
-      <button class="btn-act btn-act-del" @click="focus.splice(i,1);saveDay()" title="放弃">✕</button>
+      <button class="btn-act-text" @click="moveFocus(i,'done')">完成</button>
+      <button class="btn-act-text" @click="moveFocus(i,'migrated')">迁移</button>
+      <button class="btn-act-text btn-act-del" @click="focus.splice(i,1);saveDay()">删</button>
     </div>
     <button class="btn-add" @click="focus.push('');saveDay()">+ 添加重点</button>
   </div>
@@ -211,7 +211,7 @@
 const A='/api',$={get:async u=>{const r=await fetch(A+u);return r.json()},post:async(u,b)=>{const r=await fetch(A+u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return r.json()},put:async(u,b)=>{const r=await fetch(A+u,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return r.json()},del:async u=>{const r=await fetch(A+u,{method:'DELETE'});return r.json()}}
 function ts(){return new Date().toISOString().split('T')[0]}
 function wkKey(d){d=new Date(d);const n=d.getUTCDay()||7;d.setUTCDate(d.getUTCDate()+4-n);const ys=new Date(Date.UTC(d.getUTCFullYear(),0,1));return'WK'+Math.ceil((((d-ys)/86400000)+1)/7)}
-function wkDays(){const t=new Date(),m=new Date(t),dow=m.getDay();m.setDate(m.getDate()+(dow===0?-6:1-dow));return Array.from({length:7},(_,i)=>{const d=new Date(m);d.setDate(d.getDate()+i);const s=d.toISOString().split('T')[0];return{date:s,label:['周一','周二','周三','周四','周五','周六','周日'][i],today:s===ts()}})}
+function wkDays(wk){let m;if(wk){const n=parseInt(wk.replace('WK','')),y=new Date().getFullYear(),j4=new Date(Date.UTC(y,0,4)),j4d=j4.getUTCDay()||7;m=new Date(Date.UTC(y,0,4-j4d+1));m.setUTCDate(m.getUTCDate()+(n-1)*7)}else{m=new Date();const dow=m.getDay();m.setDate(m.getDate()+(dow===0?-6:1-dow))}return Array.from({length:7},(_,i)=>{const d=new Date(m);d.setDate(m.getDate()+i);const s=d.toISOString().split('T')[0];return{date:s,label:['周一','周二','周三','周四','周五','周六','周日'][i],today:s===ts()}})}
 function split(s){return(s||'').split('\n').filter(l=>l.trim())}
 function join(a){return a.filter(s=>s.trim()).join('\n')}
 
@@ -221,13 +221,13 @@ Vue.createApp({data(){return{
   tasks:[],reviewText:'',revTab:'days',dayRecords:[],weekOpts:[],yesterdayRef:'加载中...',
   savingWeek:false,savingDay:false,weekSaved:false,daySaved:false,
   closing:false,genBusy:false,saveBusy:false,revSaved:false,
-  showTask:false,tc:'',tt:'必须完成',st:null,toast:''
-}},computed:{weekDays(){return wkDays()}},
+  showTask:false,tc:'',tt:'必须完成',st:null,toast:'',autoSaveTimer:null
+}},computed:{weekDays(){return wkDays(this.wk)}},
 async mounted(){await this.refreshOpts();await this.loadAll()},
 methods:{
   async refreshOpts(){try{const r=await $.get('/weeks?page_size=50');if(r.code===0&&r.data?.items){const all=r.data.items.map(w=>w.key);const cur=this.wk;const num=parseInt(cur.replace('WK',''));const want=[];for(let i=num-2;i<=num+2;i++){const k='WK'+i;if(!want.find(w=>w.key===k))want.push({key:k,label:all.includes(k)?(r.data.items.find(w=>w['周次']===k)||{}).状态||'':''})};this.weekOpts=want}}catch(e){} },
-  async switchWeek(k){this.wk=k;this.w={本周主线:'',本周必须完成:'',本周推进即可:'',临时进入:''};this.tasks=[];this.reviewText='';this.revTab='days';await this.loadAll()},
-  async loadAll(){await Promise.all([this.loadWeek(),this.loadTasks(),this.loadReview()]);const ds=this.weekDays;this.day=ds.find(d=>d.today)?.date||ds[0].date;await this.loadDay();await this.loadYesterdayRef();await this.refreshOpts()},
+  async switchWeek(k){this.stopAutoSave();this.wk=k;await this.loadAll();await this.refreshOpts()},
+  async loadAll(){await Promise.all([this.loadWeek(),this.loadTasks(),this.loadReview()]);const ds=this.weekDays;this.day=ds.find(d=>d.today)?.date||ds[0].date;await Promise.all([this.loadDay(),this.loadYesterdayRef()])},
   async shiftWeek(d){const cur=this.weekOpts.findIndex(w=>w.key===this.wk);const nxt=this.weekOpts[cur+d];if(nxt)this.switchWeek(nxt.key)},
 
   async loadWeek(){try{const r=await $.get('/weeks/'+this.wk);if(r.code===0&&r.data)Object.assign(this.w,{本周主线:r.data['本周主线']||'',本周必须完成:r.data['本周必须完成']||'',本周推进即可:r.data['本周推进即可']||'',临时进入:r.data['临时进入']||''})}catch(e){} },
@@ -236,15 +236,18 @@ methods:{
 
   async loadDay(){this.focus=[''];this.temp=[];this.doneItems=[];this.migItems=[];this.dropItems=[];this.interrupt='';this.next=[''];this.closed=false
     try{const r=await $.get('/weeks/'+this.wk+'/days/'+this.day);if(r.code===0&&r.data){const f=r.data;this.focus=split(f['今日重点']);this.temp=split(f['临时插入']);this.doneItems=split(f['收尾_完成']);this.migItems=split(f['收尾_迁移']);this.dropItems=split(f['收尾_搁置放弃']);this.interrupt=f['主要打断']||'';this.next=split(f['明日优先']);this.closed=f['收尾状态']==='已收尾'}
-    if(!this.focus.length)this.focus=[''];if(!this.next.length)this.next=['']}catch(e){}},
-  saveDayDebounced(){clearTimeout(this.st);this.st=setTimeout(()=>this.saveDay(),400)},
-  async saveDay(){this.savingDay=true;this.daySaved=false
-    try{await $.put('/weeks/'+this.wk+'/days/'+this.day,{今日重点:join(this.focus),临时插入:join(this.temp),收尾_完成:join(this.doneItems),收尾_迁移:join(this.migItems),收尾_搁置放弃:join(this.dropItems),主要打断:this.interrupt,明日优先:join(this.next)});this.daySaved=true;setTimeout(()=>this.daySaved=false,2000)}catch(e){};this.savingDay=false},
+    if(!this.focus.length)this.focus=[''];if(!this.next.length)this.next=[''];this.startAutoSave()}catch(e){}},
+  startAutoSave(){this.stopAutoSave();this.autoSaveTimer=setInterval(()=>{this.saveDay();this.saveWeek()},60000)},
+	  stopAutoSave(){if(this.autoSaveTimer){clearInterval(this.autoSaveTimer);this.autoSaveTimer=null}},
+	  saveDayDebounced(){clearTimeout(this.st);this.st=setTimeout(()=>this.saveDay(),400)},
+	  saveWeekDebounced(){clearTimeout(this._swt);this._swt=setTimeout(()=>this.saveWeek(),800)},
+  async saveDay(){if(this._saving)return;this._saving=true;this.savingDay=true;this.daySaved=false
+    try{await $.put('/weeks/'+this.wk+'/days/'+this.day,{今日重点:join(this.focus),临时插入:join(this.temp),收尾_完成:join(this.doneItems),收尾_迁移:join(this.migItems),收尾_搁置放弃:join(this.dropItems),主要打断:this.interrupt,明日优先:join(this.next)});this.daySaved=true;setTimeout(()=>this.daySaved=false,2000)}catch(e){};this._saving=false;this.savingDay=false},
 
   moveFocus(i,target){const item=this.focus[i];if(!item.trim())return;this.focus.splice(i,1);if(!this.focus.length)this.focus=['']
     if(target==='done'){this.doneItems.push(item);this.toast='✅ 已归入完成区'}
     else if(target==='migrated'){this.migItems.push(item);this.toast='➡️ 已归入迁移区'}
-    this.saveDay();setTimeout(()=>this.toast='',1500)},
+    this.saveDay().catch(()=>{if(target==='done')this.doneItems.pop();else this.migItems.pop();this.focus.splice(i,0,item);if(this.focus.length>1&&this.focus[0]==='')this.focus.shift()});setTimeout(()=>this.toast='',1500)},
   async quickClose(){this.closing=true;try{const remain=this.focus.filter(s=>s.trim());if(remain.length){this.doneItems.push(...remain);this.focus=['']}
     await this.saveDay();const r=await $.post('/weeks/'+this.wk+'/days/'+this.day+'/close');if(r.code===0)this.closed=true}catch(e){};this.closing=false},
 
@@ -257,7 +260,7 @@ methods:{
       if(this.focus[0]==='')this.focus=[''];this.saveDay();this.toast='📥 已继承昨日';setTimeout(()=>this.toast='',1500)}}catch(e){}},
 
   async loadTasks(){try{const r=await $.get('/weeks/'+this.wk+'/tasks');if(r.code===0)this.tasks=r.data||[]}catch(e){} },
-  async toggleTask(t){t['完成状态']=!t['完成状态'];await $.put('/weeks/'+this.wk+'/tasks/'+t.record_id,{'完成状态':t['完成状态']})},
+  async toggleTask(t){t['完成状态']=!t['完成状态'];try{await $.put('/weeks/'+this.wk+'/tasks/'+t.record_id,{'完成状态':t['完成状态']})}catch(e){t['完成状态']=!t['完成状态']}},
   async addTask(){if(!this.tc.trim())return;await $.post('/weeks/'+this.wk+'/tasks',{content:this.tc.trim(),task_type:this.tt});this.tc='';this.showTask=false;await this.loadTasks()},
   async delTask(id){await $.del('/weeks/'+this.wk+'/tasks/'+id);await this.loadTasks()},
   addTaskToFocus(text){if(!this.focus.includes(text)){if(this.focus[0]==='')this.focus[0]=text;else this.focus.push(text);this.saveDay()}},

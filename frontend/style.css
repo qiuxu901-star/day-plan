@@ -332,6 +332,16 @@ button:hover {
 .btn-act:hover { border-color: var(--brand); color: var(--brand); transform: scale(1.1); }
 .btn-act-del:hover { border-color: var(--danger); color: var(--danger); }
 
+.btn-act-text {
+  min-height: 0; padding: 4px 10px;
+  border-radius: 12px; border: 1.5px solid var(--line);
+  background: rgba(255,255,255,0.7); font-size: 12px; font-weight: 600;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: all .12s; color: var(--muted);
+}
+.btn-act-text:hover { border-color: var(--brand); color: var(--brand); }
+.btn-act-text.btn-act-del:hover { border-color: var(--danger); color: var(--danger); }
+
 .btn-add {
   width: 100%; padding: 10px; border: 1.5px dashed var(--line); border-radius: 14px;
   background: transparent; color: var(--muted); font-size: 13px; font-weight: 600;
