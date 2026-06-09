@@ -8,17 +8,21 @@ const DailyFocus = {
     return { saving: false };
   },
   mounted() {
-    this.$nextTick(() => {
-      const el = this.$el.querySelector('.focus-list');
-      if (el) {
-        this._cleanup = useDragSort(el, this.focus, {
-          onEnd: () => this.$emit('reorder'),
-        });
-      }
-    });
+    this._initDrag();
+  },
+  updated() {
+    this._initDrag();
   },
   beforeUnmount() { if (this._cleanup) this._cleanup(); },
   methods: {
+    _initDrag() {
+      if (this._cleanup) return; // 只初始化一次
+      const el = this.$el.querySelector('.focus-list');
+      if (!el || !el.children.length) return;
+      this._cleanup = useDragSort(el, this.focus, {
+        onEnd: () => this.$emit('reorder'),
+      });
+    },
     moveItem(i, target) {
       const item = this.focus[i];
       if (!item || !item.trim()) return;
@@ -42,8 +46,8 @@ const DailyFocus = {
       <div style="margin-bottom:16px;">
         <span style="font-size:13px;font-weight:700;color:var(--muted);">🎯 今日重点</span>
         <div class="focus-list" style="display:flex;flex-direction:column;gap:4px;">
-          <div v-for="(item,i) in focus" :key="'f'+i" class="item-line">
-            <span class="drag-handle" style="color:#ccc;cursor:grab;font-size:14px;user-select:none;">⠿</span>
+          <div v-for="(item,i) in focus" :key="i" class="item-line">
+            <span class="drag-handle" style="color:#ccc;cursor:grab;font-size:16px;user-select:none;padding:0 4px;">⋮⋮</span>
             <input :value="item" @input="onInput(i, $event)" @blur="$emit('save')" @keyup.enter="$event.target.blur()" :placeholder="'重点 '+(i+1)" />
             <button class="btn-act-text" @click="moveItem(i,'done')">完成</button>
             <button class="btn-act-text" @click="moveItem(i,'migrated')">迁移</button>
