@@ -273,7 +273,7 @@ const app = Vue.createApp({
       await this.loadTasks();
     },
     async onReorderTasks(ids) {
-      try { await $.put('/weeks/' + this.wk + '/tasks/reorder', ids); } catch (e) {}
+      try { await $.put('/weeks/' + this.wk + '/tasks/reorder', {task_ids: ids}); } catch (e) {}
     },
     onAddTaskToFocus(text) {
       if (!this.focus.includes(text)) {

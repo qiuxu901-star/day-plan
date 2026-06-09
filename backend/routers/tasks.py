@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Optional, List
 """周任务路由——任务 CRUD、排序。"""
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException
 
 from backend.services.task_service import (
     list_tasks,
@@ -60,9 +60,10 @@ async def delete_task_api(wk: str, task_id: str):
 
 
 @router.put("/weeks/{wk}/tasks/reorder")
-async def reorder_tasks_api(wk: str, task_ids: List[str] = Body(...)):
-    """批量更新任务排序（body: ["id1","id2",...]）。"""
+async def reorder_tasks_api(wk: str, body: dict):
+    """批量更新任务排序。body: {task_ids: [...]}  或直接传 [...]"""
     try:
+        task_ids = body if isinstance(body, list) else body.get("task_ids", [])
         ok = await reorder_tasks(task_ids)
         return {"code": 0, "data": {"ok": ok}}
     except Exception as e:
