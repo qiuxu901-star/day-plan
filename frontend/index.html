@@ -17,7 +17,7 @@
 <div v-if="toast" style="position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999;background:var(--text);color:#fff;padding:12px 24px;border-radius:999px;font-weight:700;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.15);">{{ toast }}</div>
 
 <!-- Keyboard shortcuts hint -->
-<div v-if="showShortcuts" style="display:flex;flex-wrap:wrap;gap:8px 18px;padding:10px 18px;margin-bottom:8px;background:rgba(255,255,255,0.7);border:1px solid var(--line);border-radius:14px;font-size:11px;color:var(--muted);">
+<div v-if="showShortcuts" style="display:flex;flex-wrap:wrap;gap:8px 18px;padding:10px 18px;margin-bottom:8px;background:var(--panel);border:1px solid var(--line);border-radius:14px;font-size:11px;color:var(--muted);">
   <span><kbd>← →</kbd> 切换日期</span>
   <span><kbd>Ctrl+S</kbd> 保存</span>
   <span><kbd>Ctrl+Enter</kbd> 一键收尾</span>

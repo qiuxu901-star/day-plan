@@ -47,7 +47,7 @@ const DailyFocus = {
         <span style="font-size:13px;font-weight:700;color:var(--muted);">🎯 今日重点</span>
         <div class="focus-list" style="display:flex;flex-direction:column;gap:4px;">
           <div v-for="(item,i) in focus" :key="i" class="item-line">
-            <span class="drag-handle" style="color:#ccc;cursor:grab;font-size:16px;user-select:none;padding:0 4px;">⋮⋮</span>
+            <span class="drag-handle" style="cursor:grab;font-size:16px;user-select:none;padding:0 4px;">⋮⋮</span>
             <input :value="item" @input="onInput(i, $event)" @blur="$emit('save')" @keyup.enter="$event.target.blur()" :placeholder="'重点 '+(i+1)" />
             <button class="btn-act-text" @click="moveItem(i,'done')">完成</button>
             <button class="btn-act-text" @click="moveItem(i,'migrated')">迁移</button>

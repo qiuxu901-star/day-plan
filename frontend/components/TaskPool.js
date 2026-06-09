@@ -59,7 +59,7 @@ const TaskPool = {
       <div class="task-list" v-if="tasks.length" style="display:flex;flex-direction:column;gap:4px;">
         <div v-for="t in tasks" :key="t.record_id"
           style="display:flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,0.6);">
-          <span class="drag-handle" style="color:#ccc;cursor:grab;font-size:16px;user-select:none;padding:0 4px;">⋮⋮</span>
+          <span class="drag-handle" style="cursor:grab;font-size:16px;user-select:none;padding:0 4px;">⋮⋮</span>
           <input type="checkbox" :checked="t['完成状态']" @change="$emit('toggle', t)" style="width:18px;height:18px;min-height:0;flex-shrink:0;" />
           <span :style="{fontSize:'13px',textDecoration:t['完成状态']?'line-through':'none',opacity:t['完成状态']?0.4:1,cursor:'pointer',flex:1}" @click="$emit('add-to-focus', t['任务内容'])">{{ t['任务内容'] }}</span>
           <span :style="{fontSize:'10px',padding:'2px 7px',borderRadius:'99px',fontWeight:600}" :class="typeClass(t['任务类型'])">{{ t['任务类型'] }}</span>

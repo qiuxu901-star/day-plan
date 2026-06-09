@@ -79,10 +79,10 @@ const WeekPlan = {
         ]" :key="cfg.key" style="display:flex;flex-direction:column;gap:6px;">
           <span style="font-size:13px;font-weight:600;color:var(--muted);">{{ cfg.label }}</span>
           <div v-for="(item, i) in fields[cfg.key]" :key="cfg.key+i" style="display:flex;align-items:center;gap:6px;">
-            <span class="drag-handle" style="color:#ccc;cursor:grab;font-size:16px;user-select:none;padding:0 4px;">⋮⋮</span>
+            <span class="drag-handle" style="cursor:grab;font-size:16px;user-select:none;padding:0 4px;">⋮⋮</span>
             <input :value="item" @input="onInput(cfg.key, i, $event)" @blur="debouncedSave"
               :placeholder="cfg.placeholder"
-              style="flex:1;min-height:42px;padding:8px 12px;border-radius:12px;border:1px solid rgba(41,31,18,.12);background:rgba(255,255,255,.82);font-size:14px;" />
+              style="flex:1;min-height:42px;padding:8px 12px;border-radius:12px;font-size:14px;" />
             <button @click="removeItem(cfg.key, i)" style="width:28px;height:28px;border-radius:50%;border:1.5px solid var(--line);background:rgba(255,255,255,.7);color:var(--muted);cursor:pointer;flex-shrink:0;font-size:13px;">✕</button>
           </div>
           <button @click="addItem(cfg.key)" style="width:100%;padding:10px;border:1.5px dashed var(--line);border-radius:14px;background:transparent;color:var(--muted);font-size:13px;cursor:pointer;">+ 添加</button>
