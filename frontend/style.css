@@ -348,3 +348,57 @@ button:hover {
   cursor: pointer; min-height: 42px;
 }
 .btn-add:hover { border-color: var(--brand); color: var(--brand); background: rgba(190,90,43,0.03); }
+
+/* ═══ Day chip status ═══ */
+.choice-chip.day-closed {
+  border-color: rgba(18, 125, 124, 0.25);
+}
+.choice-chip.day-content {
+  border-color: rgba(240, 160, 32, 0.3);
+}
+.choice-chip.day-empty {
+  opacity: 0.55;
+}
+
+/* ═══ Drag & Drop ═══ */
+.drag-handle {
+  cursor: grab;
+  flex-shrink: 0;
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+.sortable-ghost {
+  opacity: 0.35;
+  background: rgba(190, 90, 43, 0.06) !important;
+}
+.sortable-drag {
+  opacity: 0.9;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  border: 1.5px dashed var(--brand) !important;
+}
+
+/* ═══ Task type badges ═══ */
+.type-must { background: rgba(190,90,43,0.1); color: var(--brand-dark); }
+.type-push { background: rgba(124,93,18,0.1); color: #7a5c12; }
+.type-temp { background: rgba(167,63,53,0.1); color: var(--danger); }
+
+/* ═══ Save feedback animation ═══ */
+.btn-saved {
+  background: #18a058 !important;
+  transition: background 0.3s ease;
+}
+
+/* ═══ Close animation ═══ */
+.daily-review-panel.closing .btn-act-text {
+  animation: pulse 0.4s ease;
+}
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+/* ═══ Mobile responsiveness ═══ */
+@media (max-width: 640px) {
+  .four-col { grid-template-columns: 1fr 1fr; }
+}
