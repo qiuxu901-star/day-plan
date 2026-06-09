@@ -402,3 +402,14 @@ button:hover {
 @media (max-width: 640px) {
   .four-col { grid-template-columns: 1fr 1fr; }
 }
+
+/* ═══ Keyboard shortcut keycap ═══ */
+kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-family: inherit;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: rgba(255,255,255,0.8);
+}
