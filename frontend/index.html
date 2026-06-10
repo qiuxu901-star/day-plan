@@ -48,6 +48,19 @@
   @save="saveDay" @move="onMoveFocus"
   @reorder="saveDay" @add="focus.push('');saveDay()"></daily-focus>
 
+<!-- ⚠️ 临时插入 -->
+<section class="panel" style="padding:18px 20px;margin-top:14px;">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+    <span style="font-size:13px;font-weight:700;color:var(--muted);">⚠️ 临时插入</span>
+    <span style="font-size:11px;color:var(--muted);opacity:0.6;">计划外的突发事项</span>
+  </div>
+  <div v-for="(item,i) in temp" :key="'t'+i" class="item-line">
+    <input :value="item" @input="temp[i]=$event.target.value" @blur="saveDay" @keyup.enter="$event.target.blur()" placeholder="临时事项" />
+    <button class="btn-act btn-act-del" @click="temp.splice(i,1);saveDay()">✕</button>
+  </div>
+  <button class="btn-add" @click="temp.push('');saveDay()">+ 添加临时事项</button>
+</section>
+
 <daily-review :done-items="doneItems" :mig-items="migItems"
   :drop-items="dropItems" :interrupt="interrupt"
   :next-items="nextItems" :closed="closed" :day-saved="daySaved"
