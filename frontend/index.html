@@ -56,7 +56,9 @@
   </div>
   <div v-for="(item,i) in temp" :key="'t'+i" class="item-line">
     <input :value="item" @input="temp[i]=$event.target.value" @blur="saveDay" @keyup.enter="$event.target.blur()" placeholder="临时事项" />
-    <button class="btn-act btn-act-del" @click="temp.splice(i,1);saveDay()">✕</button>
+    <button class="btn-act-text" @click="moveTemp(i,'done')">完成</button>
+    <button class="btn-act-text" @click="moveTemp(i,'migrated')">迁移</button>
+    <button class="btn-act-text btn-act-del" @click="temp.splice(i,1);saveDay()">删</button>
   </div>
   <button class="btn-add" @click="temp.push('');saveDay()">+ 添加临时事项</button>
 </section>
@@ -308,6 +310,15 @@ const app = Vue.createApp({
     },
 
     /* ── 今日重点操作 ── */
+    moveTemp(i, target) {
+      const item = this.temp[i];
+      if (!item || !item.trim()) return;
+      this.temp.splice(i, 1);
+      if (target === 'done') { this.doneItems.push(item); this.toast = '✅ 临时事项已归入完成区'; }
+      else if (target === 'migrated') { this.migItems.push(item); this.toast = '➡️ 临时事项已归入迁移区'; }
+      this.saveDay();
+      setTimeout(() => this.toast = '', 1500);
+    },
     onMoveFocus({ item, target }) {
       if (target === 'done') { this.doneItems.push(item); this.toast = '✅ 已归入完成区'; }
       else if (target === 'migrated') { this.migItems.push(item); this.toast = '➡️ 已归入迁移区'; }
