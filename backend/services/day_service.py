@@ -23,7 +23,8 @@ def _has_content(fields: dict) -> bool:
     return bool(
         fields.get("今日重点") or fields.get("临时插入")
         or fields.get("收尾_完成") or fields.get("收尾_迁移")
-        or fields.get("主要打断")
+        or fields.get("收尾_搁置放弃") or fields.get("主要打断")
+        or fields.get("明日优先")
     )
 
 

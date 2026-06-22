@@ -25,13 +25,61 @@ def get_week_monday(year: int, week: int) -> date:
     return monday_of_week1 + timedelta(weeks=week - 1)
 
 
+def _week_has_content(fields: dict) -> bool:
+    """判断周记录是否有实际内容（非空字段）。"""
+    return bool(
+        fields.get("本周主线") or fields.get("本周必须完成")
+        or fields.get("本周推进即可") or fields.get("临时进入")
+        or fields.get("本周总结")
+    )
+
+
+def _pick_best_week_record(records: list) -> Optional[dict]:
+    """从多条周记录中选择最佳的一条：有内容的优先，否则选 record_id 最小的。"""
+    if not records:
+        return None
+    with_content = [r for r in records if _week_has_content(r.get("fields", {}))]
+    if with_content:
+        with_content.sort(key=lambda r: r["record_id"])
+        return with_content[0]
+    records.sort(key=lambda r: r["record_id"])
+    return records[0]
+
+
+async def _dedup_week(wk: str) -> int:
+    """删除指定周的重复记录，保留确定性选择的一条（并发安全）。"""
+    filter_expr = f'CurrentValue.[周次]="{wk}"'
+    records = await bitable.list_all_records(settings.TABLE_ID_WEEKLY, filter_expr=filter_expr)
+
+    if len(records) <= 1:
+        return 0
+
+    keep = _pick_best_week_record(records)
+    if keep is None:
+        return 0
+
+    deleted = 0
+    for r in records:
+        if r["record_id"] != keep["record_id"]:
+            try:
+                await bitable.delete_record(settings.TABLE_ID_WEEKLY, r["record_id"])
+                deleted += 1
+            except Exception as e:
+                logger.debug(f"删除重复周记录失败（可能已删除） {r['record_id']}: {e}")
+
+    if deleted:
+        logger.warning(f"去重: {wk} 删除了 {deleted} 条重复周记录，保留了 {keep['record_id']}")
+    return deleted
+
+
 async def get_or_create_week(wk: str, today: Optional[date] = None) -> dict:
     """获取指定周记录，如不存在则自动创建。"""
     filter_expr = f'CurrentValue.[周次]="{wk}"'
     records = await bitable.list_all_records(settings.TABLE_ID_WEEKLY, filter_expr=filter_expr)
 
-    if records:
-        return bitable.extract_record_fields(records[0])
+    best = _pick_best_week_record(records)
+    if best is not None:
+        return bitable.extract_record_fields(best)
 
     # 自动创建
     today = today or date.today()
@@ -51,6 +99,10 @@ async def get_or_create_week(wk: str, today: Optional[date] = None) -> dict:
         "状态": "进行中",
     }
     record = await bitable.create_record(settings.TABLE_ID_WEEKLY, fields)
+
+    # 去重：防止并发创建导致的重复记录
+    await _dedup_week(wk)
+
     return bitable.extract_record_fields(record)
 
 
@@ -72,19 +124,21 @@ async def get_week(wk: str) -> Optional[dict]:
     """获取指定周详情。"""
     filter_expr = f'CurrentValue.[周次]="{wk}"'
     records = await bitable.list_all_records(settings.TABLE_ID_WEEKLY, filter_expr=filter_expr)
-    if not records:
+    best = _pick_best_week_record(records)
+    if best is None:
         return None
-    return bitable.extract_record_fields(records[0])
+    return bitable.extract_record_fields(best)
 
 
 async def update_week(wk: str, fields: dict) -> dict:
     """更新周计划字段（部分更新）。先查找 record_id，再更新。"""
     filter_expr = f'CurrentValue.[周次]="{wk}"'
     records = await bitable.list_all_records(settings.TABLE_ID_WEEKLY, filter_expr=filter_expr)
-    if not records:
+    best = _pick_best_week_record(records)
+    if best is None:
         raise ValueError(f"周记录不存在: {wk}")
 
-    record_id = records[0]["record_id"]
+    record_id = best["record_id"]
     updated = await bitable.update_record(settings.TABLE_ID_WEEKLY, record_id, fields)
     return bitable.extract_record_fields(updated)
 

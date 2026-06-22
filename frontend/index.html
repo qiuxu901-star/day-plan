@@ -256,7 +256,11 @@ const app = Vue.createApp({
     /* ── 周计划保存 ── */
     async onSaveWeek(payload) {
       this.savingWeek = true; this.weekSaved = false;
-      try { await $.put('/weeks/' + this.wk, payload); this.weekSaved = true; setTimeout(() => this.weekSaved = false, 2000); } catch (e) {}
+      try {
+        const r = await $.put('/weeks/' + this.wk, payload);
+        if (r.code === 0) Object.assign(this.w, payload);  // 同步 this.w，防止自动保存覆盖
+        this.weekSaved = true; setTimeout(() => this.weekSaved = false, 2000);
+      } catch (e) {}
       this.savingWeek = false;
     },
 
