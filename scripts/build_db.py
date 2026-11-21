@@ -120,6 +120,11 @@ def create_meta_tables(conn):
         record_id TEXT, local_hash TEXT, platform_hash TEXT, note TEXT,
         resolved INTEGER DEFAULT 0
       );
+      CREATE TABLE IF NOT EXISTS skills (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT,
+        content TEXT, status TEXT DEFAULT 'active',
+        created_at TEXT, updated_at TEXT
+      );
     """)
 
 

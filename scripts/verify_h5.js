@@ -46,6 +46,8 @@ const dom = new JSDOM(html, {
       else if (url.includes('/meta/tables')) body = meta;
       else if (url.includes('/v1/task?')) body = {items:[taskRow], total:1, page:1, size:200, has_more:false, next_page:null};
       else if (/^\/workboard\/api\/v1\/\w+\?/.test(url)) body = {items:[], total:0, page:1, size:200, has_more:false, next_page:null};
+      else if (url.includes('/api/keys')) body = url.includes('method') ? {id:'k_test',key:'wb_fake',scope:'read'} : [{id:'k_test',scope:'read',note:'测试',revoked:0,created_at:'2026-11-21'}];
+      else if (url.includes('/api/skills')) body = [{id:'s_test',name:'测试技能',description:'_desc',content:'_content',updated_at:'2026-11-21'}];
       else body = {record_id:'new-1'};
       return Promise.resolve({ok:true, status:200, json:()=>Promise.resolve(body)});
     };
@@ -63,6 +65,10 @@ setTimeout(() => {
   const bodyLen = d.body.textContent.replace(/\s+/g,'').length;
   checks.push(['DOM有实际内容('+bodyLen+'字)', bodyLen > 200]);
   checks.push(['无JS运行时错误', errors.length === 0]);
+  checks.push(['APP Key 页面存在', !!d.getElementById('view-keys')]);
+  checks.push(['AI生成Key页面存在', !!d.getElementById('view-aikey')]);
+  checks.push(['技能管理页面存在', !!d.getElementById('view-skills')]);
+  checks.push(['新导航按钮存在', d.querySelectorAll('[data-view="keys"]').length>=2]);
 
   let pass = 0;
   console.log('\n=== H5 回放验证 ===');

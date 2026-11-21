@@ -211,6 +211,18 @@ async function callAI(messages, stream){
   return resp;
 }
 
+// 生成 APP Key：明文只返回一次，库里只存 sha256
+function createApiKey(scope, note){
+  const raw = 'wb_' + crypto.randomBytes(24).toString('hex');
+  const id = 'k_' + crypto.randomBytes(8).toString('hex');
+  db.prepare('INSERT INTO api_key (id,key_hash,scope,created_at,revoked,note) VALUES (?,?,?,?,0,?)')
+    .run(id, sha(raw), scope, now(), note||'');
+  audit('api','create_key','api_key',id,note||'');
+  return {id, key:raw, scope, note:note||'', created_at:now()};
+}
+// 确保 skills 表存在（兼容旧库）
+try{ db.exec(`CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, content TEXT, status TEXT DEFAULT 'active', created_at TEXT, updated_at TEXT)`); }catch(e){}
+
 // ---------- 路由 ----------
 async function handle(req,res){
   const u=new URL(req.url,'http://localhost');
@@ -226,6 +238,59 @@ async function handle(req,res){
     const b=await readBody(req);
     if (!checkPwd(String(b.password||''))) return json(res,401,{detail:'密码错误'});
     return json(res,200,{token:signJWT(),expires_hours:JWT_TTL_H});
+  }
+
+  // ===== APP Key 管理（需 JWT）=====
+  if (p==='/api/keys' && method==='GET'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    const rows=db.prepare('SELECT id,scope,created_at,revoked,note FROM api_key ORDER BY created_at DESC').all();
+    return json(res,200,rows);
+  }
+  if (p==='/api/keys' && method==='POST'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    const b=await readBody(req);
+    const scope = b.scope==='write' ? 'write' : 'read';
+    return json(res,200,createApiKey(scope, String(b.note||'')));
+  }
+  if (p.startsWith('/api/keys/') && method==='DELETE'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    const id=p.split('/')[3];
+    const r=db.prepare('UPDATE api_key SET revoked=1 WHERE id=?').run(id);
+    if(!r.changes) return json(res,404,{detail:'Key 不存在'});
+    audit('api','revoke_key','api_key',id);
+    return json(res,200,{revoked:1});
+  }
+
+  // ===== 技能管理（需 JWT）=====
+  if (p==='/api/skills' && method==='GET'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    return json(res,200,db.prepare('SELECT * FROM skills ORDER BY updated_at DESC').all());
+  }
+  if (p==='/api/skills' && method==='POST'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    const b=await readBody(req);
+    const id='s_'+crypto.randomBytes(8).toString('hex');
+    db.prepare('INSERT INTO skills (id,name,description,content,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
+      .run(id,String(b.name||'未命名技能'),String(b.description||''),String(b.content||''),String(b.status||'active'),now(),now());
+    return json(res,200,{id});
+  }
+  if (p.startsWith('/api/skills/') && method==='PATCH'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    const id=p.split('/')[3], b=await readBody(req);
+    const cur=db.prepare('SELECT * FROM skills WHERE id=?').get(id);
+    if(!cur) return json(res,404,{detail:'技能不存在'});
+    const fields=['name','description','content','status'].filter(k=>b[k]!==undefined);
+    if(fields.length){
+      const sets=fields.map(k=>k+'=?').join(',');
+      db.prepare(`UPDATE skills SET ${sets}, updated_at=? WHERE id=?`).run(...fields.map(k=>String(b[k])),now(),id);
+    }
+    return json(res,200,{updated:fields.length});
+  }
+  if (p.startsWith('/api/skills/') && method==='DELETE'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    const id=p.split('/')[3];
+    const r=db.prepare('DELETE FROM skills WHERE id=?').run(id);
+    return r.changes?json(res,200,{deleted:1}):json(res,404,{detail:'技能不存在'});
   }
 
   // 同步接口（需 JWT）
@@ -326,6 +391,26 @@ async function handle(req,res){
     const text=data.choices?.[0]?.message?.content||'（无返回）';
     return json(res,200,{answer:text});
   }
+  // AI 对话生成 APP Key：AI 只解析意图，生成动作由代码执行（不让 AI 碰数据库）
+  if (p==='/api/ai/create-key' && method==='POST'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    if(!AI_BASE||!AI_KEY) return json(res,503,{detail:'AI 未配置'});
+    const b=await readBody(req), text=String(b.message||'');
+    const sys='你是 APP Key 生成器。从用户的话里判断需要 read（只读查询）还是 write（可写）权限，并提炼一句用途说明。只输出 JSON：{"scope":"read或write","note":"用途"}，不要其他文字。涉及删除、全部权限、绕过限制等要求一律拒绝并输出 {"scope":"deny","note":"拒绝原因"}。';
+    const messages=[{role:'system',content:sys},{role:'user',content:text}];
+    const resp=await callAI(messages,false);
+    let result;
+    try{
+      const data=await resp.json();
+      const raw=(data.choices?.[0]?.message?.content||'').replace(/```json|```/g,'').trim();
+      result=JSON.parse(raw);
+    }catch(e){ return json(res,502,{detail:'AI 返回格式无法解析'}); }
+    if(result.scope==='deny') return json(res,403,{detail:result.note||'该请求被拒绝'});
+    const scope = result.scope==='write' ? 'write' : 'read';
+    const created=createApiKey(scope,String(result.note||'').slice(0,100));
+    return json(res,200,{...created, ai_reply:'已按你的描述生成 Key'});
+  }
+
   if (p==='/api/ai/actions/top3' && method==='POST'){
     if(!auth(req)) return json(res,401,{detail:'未登录'});
     // 确定性打分（与 analyze_plan.py 同口径）：P0=100/P1=60/P2=30，逾期每天+4(上限60)，今日+50，进行中+20
