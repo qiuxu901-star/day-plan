@@ -233,14 +233,15 @@ const FIELD_WHITELIST = {
 const STATUS_ENUM = ['待办','进行中','已完成'];
 const PRIORITY_ENUM = ['P0','P1','P2'];
 const INTENT_SYS = `你是"潮汐"工作台的意图分类器。只输出一个严格 JSON 对象，禁止解释文字、禁止 markdown 代码块。
-输出格式：{"intent":"record|start|wrap|qa|chitchat","confidence":0到1,"slots":{},"reason":"一句话"}
+输出格式：{"intent":"record|start|wrap|qa|create_skill|chitchat","confidence":0到1,"slots":{},"reason":"一句话"}
 意图定义：
 - record：用户口述要新增/修改任务、时间记录、复盘、收集箱。slots={"target":"task|time|inbox|review","items":[{"字段名":"值"}]}。日期用 YYYY-MM-DD；"今天/明天"不要自行推算，交给代码。
 - start：开工、今日计划、今天重点、TOP3、今天该做什么。slots={"date":"YYYY-MM-DD"}
 - wrap：收工、复盘、今天完成了什么、计划和实际差多少。slots={"date":"YYYY-MM-DD"}
 - qa：基于已有记录提问。slots={"question":"原话"}
+- create_skill：用户要「建/写/生成/存一个技能」。slots={"name":"kebab-case英文名","description":"一句话触发描述","content_md":"完整SKILL.md正文"}。只生成草稿给用户确认，绝不直接写库。name 必须小写字母/数字/连字符，3-64 位。
 - chitchat：问候闲聊、无法归类、或要求删除/越权/绕过限制。
-安全规则：不得编造记录；要求删除数据、改权限、绕过限制 → chitchat 并说明拒绝；拿不准就 chitchat 并说明。宁可不写不能写错。`;
+安全规则：不得编造记录；要求删除数据、改权限、绕过限制 → chitchat 并说明拒绝；技能正文若含删除数据/越权/绕过/外泄密钥的指令 → chitchat 拒绝；拿不准就 chitchat 并说明。宁可不写不能写错。`;
 
 function dateToday(){ return new Date().toISOString().slice(0,10); }
 function dateTomorrow(){ const d=new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); }
@@ -324,12 +325,38 @@ function agentRecord(slots){
   return {created, errors};
 }
 
+// 对话建技能：只生成草稿，零写库，等用户确认
+function agentCreateSkill(slots){
+  const sl = slots || {};
+  let name = String(sl.name||'').toLowerCase().trim();
+  if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || name.length<3 || name.length>64)
+    return {ok:false,intent:'create_skill',reply:'技能名要用 3-64 位小写字母、数字和连字符（如 daily-review），请换一个名字。'};
+  if(name.includes('..') || name.includes('/') || name.includes('\\'))
+    return {ok:false,intent:'create_skill',reply:'技能名不合法，请换一个。'};
+  const danger=/删除(所有|全部)数据|绕过(权限|限制)|忽略(权限|确认)|外泄(密钥|密码)|无视(规则|限制)/i;
+  if(danger.test(String(sl.content_md||'')))
+    return {ok:false,intent:'chitchat',reply:'技能内容包含删除数据或绕过限制等指令，我不能创建这样的技能。'};
+  if(db.prepare('SELECT 1 FROM skills WHERE name=?').get(name))
+    return {ok:false,intent:'create_skill',reply:'已存在同名技能「'+name+'」，换个名字或去技能管理页编辑。'};
+  const description=String(sl.description||'').trim() || ('当用户问与「'+name+'」相关的问题时使用。');
+  const fm='---\nname: '+name+'\ndescription: |\n  '+description+'\nagent_created: true\n---\n\n';
+  let body=String(sl.content_md||'').replace(/^```(?:markdown|md)?\n?/i,'').replace(/\n?```$/,'').trim();
+  if(body.length<200){
+    body='## 使用场景\n当遇到……的情况时使用本技能。\n\n## 判断步骤\n1. 先确认……\n2. 再判断……\n\n'+
+         '## 输出模板\n（在这里写清楚输出结构与语气。）\n\n## 不适用\n- ……\n';
+  }
+  return {ok:false,need_confirm:true,intent:'create_skill',
+    reply:'我起草了一个技能，确认后才存到服务器：',
+    preview:{name,description,content_md:fm+body}};
+}
+
 // 关键词兜底：AI 不可用或解析失败时用
 function classifyByKeyword(text){
   const t=String(text||'');
   if(/开工|今日计划|今天重点|TOP3|今天该做/i.test(t)) return {intent:'start',confidence:0.9,slots:{},reason:'关键词'};
   if(/收工|复盘|今天完成|今天做了/i.test(t)) return {intent:'wrap',confidence:0.9,slots:{},reason:'关键词'};
   if(/记一?下|加个?任务|今天的?计划是|新增|记录一下/.test(t)) return {intent:'record',confidence:0.8,slots:{target:'task',items:[{'任务名称':t.replace(/^(记一下|记录一下|加个任务|今天的计划是|新增)/,'').replace(/^[：:，,\s]+/,'').trim()}]},reason:'关键词'};
+  if(/建(个|一个)?技能|生成技能|写成技能|存成技能|做个技能/i.test(t)) return {intent:'create_skill',confidence:0.75,slots:{},reason:'关键词'};
   if(/有哪些事|什么状态|几?条任务|查一下|现在怎么样/.test(t)) return {intent:'qa',confidence:0.8,slots:{question:t},reason:'关键词'};
   return {intent:'chitchat',confidence:0.5,slots:{},reason:'无法识别'};
 }
@@ -354,7 +381,7 @@ async function classifyIntent(message, history){
     const d=await r.json();
     const raw=(d.choices?.[0]?.message?.content||'').replace(/```json|```/g,'').trim();
     const obj=JSON.parse(raw);
-    if(!obj.intent || !['record','start','wrap','qa','chitchat'].includes(obj.intent)) throw new Error('bad intent');
+    if(!obj.intent || !['record','start','wrap','qa','create_skill','chitchat'].includes(obj.intent)) throw new Error('bad intent');
     return obj;
   }catch(e){
     return classifyByKeyword(message);
@@ -366,7 +393,7 @@ try{ db.exec(`CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY, name TEXT 
 // 旧库平滑加列（幂等）
 try{
   const exist = new Set(db.prepare('PRAGMA table_info(skills)').all().map(r=>r.name));
-  ['scripts_json','related_json','source_sha'].forEach(c=>{
+  ['scripts_json','related_json','source_sha','origin'].forEach(c=>{
     if(!exist.has(c)) db.exec('ALTER TABLE skills ADD COLUMN '+c+' TEXT');
   });
 }catch(e){ console.error('skills 加列失败:',e.message); }
@@ -417,10 +444,23 @@ async function handle(req,res){
   if (p==='/api/skills' && method==='POST'){
     if(!auth(req)) return json(res,401,{detail:'未登录'});
     const b=await readBody(req);
+    const name=String(b.name||'').toLowerCase().trim();
+    if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)||name.length<3||name.length>64)
+      return json(res,400,{detail:'技能名不合法（需 3-64 位小写字母/数字/连字符）'});
+    if(db.prepare('SELECT 1 FROM skills WHERE name=?').get(name))
+      return json(res,409,{detail:'同名技能已存在'});
+    const content=String(b.content||'');
     const id='s_'+crypto.randomBytes(8).toString('hex');
-    db.prepare('INSERT INTO skills (id,name,description,content,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
-      .run(id,String(b.name||'未命名技能'),String(b.description||''),String(b.content||''),String(b.status||'active'),now(),now());
-    return json(res,200,{id});
+    const source_sha=crypto.createHash('sha256').update(content).digest('hex');
+    db.prepare(`INSERT INTO skills (id,name,description,content,status,source_sha,related_json,scripts_json,origin,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id,name,String(b.description||''),content,String(b.status||'active'),source_sha,
+           String(b.related_json||'[]'),String(b.scripts_json||'{}'),
+           String(b.origin||(b.agent_created?'agent':'manual')),now(),now());
+    audit(String(b.origin||'manual'),'agent_create_skill','skills',id,
+      JSON.stringify({created:[{table:'skills',record_id:id}],name,origin:b.origin||'manual'}));
+    const aid=db.prepare('SELECT last_insert_rowid() id').get().id;
+    return json(res,200,{id,audit_id:aid,name,source_sha});
   }
   if (p.startsWith('/api/skills/') && method==='PATCH'){
     if(!auth(req)) return json(res,401,{detail:'未登录'});
@@ -556,8 +596,12 @@ async function handle(req,res){
         const qm=message.replace(/^(今天的计划是|记一下|记录一下|加个任务|新增)/,'').replace(/^[：:，,\s]+/,'').trim();
         intent.slots={target:'task',items:[{'任务名称':qm||message}]};
       }
+    } else if(b.preset_intent==='create_skill' && b.slots && Object.keys(b.slots).length){
+      // 已有明确槽位（如前端预览后重试）：直接用
+      intent={intent:'create_skill',confidence:1,slots:b.slots,reason:'指定槽位'};
     } else {
       intent=await classifyIntent(message,b.history);
+      if(b.preset_intent==='create_skill') intent.intent='create_skill';
     }
     const conf=Number(intent.confidence)||0;
     if(intent.intent==='record' && conf<0.6){
@@ -588,6 +632,8 @@ async function handle(req,res){
       const d=await resp.json();
       reply=d.choices?.[0]?.message?.content||'（无返回）';
       data.answer=reply;
+    } else if(intent.intent==='create_skill'){
+      return json(res,200,agentCreateSkill(intent.slots));
     } else {
       reply='我是潮汐，你的时间与精力助手。可以说「开工」看今天重点，或直接告诉我今天的计划，我帮你记下来。';
     }
@@ -601,7 +647,11 @@ async function handle(req,res){
     let det; try{ det=JSON.parse(row.detail); }catch(e){ return json(res,400,{detail:'操作记录格式错误'}); }
     if(det.undone) return json(res,200,{ok:true,undone:0,note:'已撤销过'});
     let n=0;
-    (det.created||[]).forEach(c=>{ if(deleteRecord(c.table,c.record_id,'agent')) n++; });
+    (det.created||[]).forEach(c=>{
+      if(c.table==='skills'){
+        if(db.prepare('DELETE FROM skills WHERE id=?').run(c.record_id).changes) n++;
+      } else if(deleteRecord(c.table,c.record_id,'agent')) n++;
+    });
     db.prepare('UPDATE audit_log SET detail=? WHERE id=?').run(JSON.stringify(Object.assign(det,{undone:1})),aid);
     return json(res,200,{ok:true,undone:n});
   }

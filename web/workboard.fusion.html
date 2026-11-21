@@ -3336,6 +3336,43 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 
   /* ========== TIDE Agent 对话 ========== */
   var agentState={busy:false,history:[]};
+  function renderSkillPreview(pv, reply){
+    var box=$('agentThread'); if(!box) return;
+    var wrap=document.createElement('div');
+    wrap.className='skill-preview';
+    var h=document.createElement('h4'); h.textContent='技能草稿：'+(pv.name||'');
+    var d=document.createElement('div'); d.className='sp-desc'; d.textContent=pv.description||'';
+    var ta=document.createElement('textarea'); ta.value=pv.content_md||'';  // 不 innerHTML
+    var acts=document.createElement('div'); acts.className='sp-actions';
+    var ok=document.createElement('button'); ok.className='sp-ok'; ok.textContent='确认创建';
+    var cancel=document.createElement('button'); cancel.className='sp-cancel'; cancel.textContent='取消';
+    acts.appendChild(cancel); acts.appendChild(ok);
+    wrap.appendChild(h); wrap.appendChild(d); wrap.appendChild(ta); wrap.appendChild(acts);
+    box.appendChild(wrap); box.scrollTop=box.scrollHeight;
+    cancel.onclick=function(){
+      h.textContent='（已取消）'+h.textContent; d.textContent=''; ta.disabled=true;
+      cancel.disabled=true; ok.disabled=true;
+      agentState.history.push({role:'ai',text:'（已取消创建技能）'});
+    };
+    ok.onclick=function(){
+      ok.disabled=true;
+      var body={name:pv.name,description:pv.description,content:ta.value,origin:'agent',agent_created:true};
+      wbApi('/skills',{method:'POST',body:JSON.stringify(body)})
+        .then(function(c){
+          h.textContent='✓ 已创建：'+c.name;
+          acts.innerHTML='';
+          var undo=document.createElement('button'); undo.className='sp-cancel'; undo.textContent='撤销';
+          undo.onclick=function(){
+            wbApi('/agent/undo',{method:'POST',body:JSON.stringify({audit_id:c.audit_id})})
+              .then(function(){ h.textContent='（已撤销）'+c.name; undo.disabled=true; })
+              .catch(function(e){ toast(e.message,true); });
+          };
+          acts.appendChild(undo);
+          if(toast) toast('已存到服务器。本机使用：python3 scripts/sync_skills.py --direction pull --yes');
+        }).catch(function(e){ toast(e.message,true); ok.disabled=false; });
+    };
+  }
+
   function agentBubble(role, html, meta){
     var box=$('agentThread'); if(!box) return;
     var d=document.createElement('div');
@@ -3375,6 +3412,11 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
     return wbApi('/agent/chat',{method:'POST',body:JSON.stringify(body)})
       .then(function(r){
         agentTyping(false);
+        if(r.need_confirm && r.intent==='create_skill' && r.preview){
+          renderSkillPreview(r.preview, r.reply);
+          agentState.history.push({role:'ai',text:'（已生成技能草稿，等待确认）'});
+          return;
+        }
         var html=escHtml(r.reply||'');
         if(r.data && r.data.top3 && r.data.top3.length){
           html+='<div class="agent-top3">'+r.data.top3.map(function(t){

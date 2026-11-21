@@ -47,7 +47,7 @@ def do_pull(cfg, yes, force):
         if not name.startswith("workboard-"):
             continue
         content = s.get("content") or ""
-        if len(content) < 200:
+        if len(content) < 200 and origin != "agent":
             print(f"[{name}] 正文过短，跳过")
             continue
         target = SKILLS_DIR / name / "SKILL.md"
