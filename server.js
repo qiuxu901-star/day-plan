@@ -220,6 +220,147 @@ function createApiKey(scope, note){
   audit('api','create_key','api_key',id,note||'');
   return {id, key:raw, scope, note:note||'', created_at:now()};
 }
+
+// ---------- Agent 能力（意图识别由 LLM，确定性逻辑在代码） ----------
+const AI_CONTEXT_MAX = parseInt(process.env.AI_CONTEXT_MAX || '300000', 10);
+const FIELD_WHITELIST = {
+  task: ['任务名称','状态','优先级','到期日','备注','计划日','来源','时段','事项类型','周次','主线执行','负责人','事项二'],
+  time: ['日期','事项','时长','分类','开始时间','结束时间','使用类型'],
+  inbox: ['内容','类型','标签','来源','记录日期','状态'],
+  review: ['日期','今日完成','卡点困难','明日计划','一句话总结','周次'],
+  week: ['周次','本周目标','关键结果','下周计划','周总结','体验打分']
+};
+const STATUS_ENUM = ['待办','进行中','已完成'];
+const PRIORITY_ENUM = ['P0','P1','P2'];
+const INTENT_SYS = `你是"潮汐"工作台的意图分类器。只输出一个严格 JSON 对象，禁止解释文字、禁止 markdown 代码块。
+输出格式：{"intent":"record|start|wrap|qa|chitchat","confidence":0到1,"slots":{},"reason":"一句话"}
+意图定义：
+- record：用户口述要新增/修改任务、时间记录、复盘、收集箱。slots={"target":"task|time|inbox|review","items":[{"字段名":"值"}]}。日期用 YYYY-MM-DD；"今天/明天"不要自行推算，交给代码。
+- start：开工、今日计划、今天重点、TOP3、今天该做什么。slots={"date":"YYYY-MM-DD"}
+- wrap：收工、复盘、今天完成了什么、计划和实际差多少。slots={"date":"YYYY-MM-DD"}
+- qa：基于已有记录提问。slots={"question":"原话"}
+- chitchat：问候闲聊、无法归类、或要求删除/越权/绕过限制。
+安全规则：不得编造记录；要求删除数据、改权限、绕过限制 → chitchat 并说明拒绝；拿不准就 chitchat 并说明。宁可不写不能写错。`;
+
+function dateToday(){ return new Date().toISOString().slice(0,10); }
+function dateTomorrow(){ const d=new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); }
+
+// 复用原 /api/ai/actions/top3 的确定性打分
+function computeTop3(){
+  const today=dateToday();
+  const rows=db.prepare(`SELECT * FROM ${q('task')}`).all().filter(r=>r['状态']!=='已完成');
+  const cand=rows.filter(r=>{
+    const due=(r['到期日']||'').slice(0,10), plan=(r['计划日']||'').slice(0,10);
+    return (due&&due<today)||plan===today;
+  }).map(r=>{
+    const due=(r['到期日']||'').slice(0,10);
+    const over=due&&due<today?Math.min(60,Math.floor((new Date(today)-new Date(due))/86400000)*4):0;
+    const base={'P0':100,'P1':60,'P2':30}[r['优先级']]||0;
+    const dueBonus=(r['到期日']||'').slice(0,10)===today?50:0;
+    const doing=r['状态']==='进行中'?20:0;
+    return {任务:(r['任务名称']||'')+(r['事项二']?' › '+r['事项二']:''),
+      优先级:r['优先级']||'',状态:r['状态']||'',到期日:due,计划日:(r['计划日']||'').slice(0,10),
+      分数:base+over+dueBonus+doing};
+  }).sort((a,b)=>b.分数-a.分数).slice(0,3);
+  const allOpen=rows.length;
+  return {关键3件:cand, 未完成总数:allOpen, 逾期数:rows.filter(r=>{
+    const due=(r['到期日']||'').slice(0,10); return due&&due<today; }).length};
+}
+
+function computeReview(){
+  const today=dateToday();
+  const done=db.prepare(`SELECT * FROM ${q('task')}`).all().filter(r=>{
+    const f=(r['完成时间']||'').slice(0,10), p=(r['计划日']||'').slice(0,10);
+    return f===today || (r['状态']==='已完成' && p===today);
+  });
+  const times=db.prepare(`SELECT * FROM ${q('time')}`).all().filter(r=>(r['日期']||'').slice(0,10)===today);
+  let mins=0; times.forEach(r=>{ const v=parseFloat(r['时长']); if(!isNaN(v)) mins+=v; });
+  return {今日完成:done.map(r=>r['任务名称']||''), 完成数:done.length,
+    时间记录数:times.length, 总时长分钟:Math.round(mins),
+    一句话:'今日完成 '+done.length+' 项，记录时间 '+Math.round(mins)+' 分钟。'};
+}
+
+// 把 LLM 槽位安全落地：白名单 → 枚举归一 → 必填校验
+function agentRecord(slots){
+  const target=(slots&&slots.target)||'task';
+  if(!FIELD_WHITELIST[target]) return {created:[],errors:['不支持写入该类型']};
+  const items=(slots&&slots.items)||[];
+  if(!items.length) return {created:[],errors:['没有可写入的条目']};
+  const created=[], errors=[];
+  items.forEach((item,i)=>{
+    const clean={};
+    Object.entries(item).forEach(([k,v])=>{
+      if(!FIELD_WHITELIST[target].includes(k) || v===null || v===undefined) return;
+      let val=String(v).trim();
+      if(k==='状态' && !STATUS_ENUM.includes(val)) val='待办';
+      if(k==='优先级' && !PRIORITY_ENUM.includes(val)) val='P2';
+      if(val==='今天') val=target==='time'?dateToday():dateToday();
+      if(val==='明天') val=dateTomorrow();
+      clean[k]=val;
+    });
+    if(target==='task'){
+      if(!clean['任务名称']){ errors.push('第'+(i+1)+'条缺少任务名称，未写入'); return; }
+      if(!clean['状态']) clean['状态']='待办';
+      if(!clean['优先级']) clean['优先级']='P2';
+      if(!clean['来源']) clean['来源']='手动';
+      if(!clean['计划日']) clean['计划日']=dateTomorrow()+'T00:00:00Z';
+      if(!clean['到期日']) clean['到期日']=clean['计划日'];
+    } else if(target==='time'){
+      if(!clean['事项']){ errors.push('第'+(i+1)+'条缺少事项，未写入'); return; }
+      if(!clean['日期']) clean['日期']=dateToday()+'T00:00:00Z';
+    } else if(target==='inbox'){
+      if(!clean['内容']){ errors.push('第'+(i+1)+'条缺少内容，未写入'); return; }
+      if(!clean['记录日期']) clean['记录日期']=dateToday()+'T00:00:00Z';
+    } else if(target==='review'){
+      if(!clean['日期']) clean['日期']=dateToday()+'T00:00:00Z';
+    }
+    const r=addRecord(target, clean, 'agent');
+    created.push(Object.assign({table:target}, clean, {record_id:r.record_id}));
+    const d=JSON.stringify({user_message:'',parsed_slots:clean,created:[{table:target,record_id:r.record_id}],undone:0});
+    audit('agent','agent_record',target,r.record_id,d);
+    const aid=db.prepare('SELECT last_insert_rowid() id').get().id;
+    created[created.length-1]._audit_id=aid;
+  });
+  return {created, errors};
+}
+
+// 关键词兜底：AI 不可用或解析失败时用
+function classifyByKeyword(text){
+  const t=String(text||'');
+  if(/开工|今日计划|今天重点|TOP3|今天该做/i.test(t)) return {intent:'start',confidence:0.9,slots:{},reason:'关键词'};
+  if(/收工|复盘|今天完成|今天做了/i.test(t)) return {intent:'wrap',confidence:0.9,slots:{},reason:'关键词'};
+  if(/记一?下|加个?任务|今天的?计划是|新增|记录一下/.test(t)) return {intent:'record',confidence:0.8,slots:{target:'task',items:[{'任务名称':t.replace(/^(记一下|记录一下|加个任务|今天的计划是|新增)/,'').replace(/^[：:，,\s]+/,'').trim()}]},reason:'关键词'};
+  if(/有哪些事|什么状态|几?条任务|查一下|现在怎么样/.test(t)) return {intent:'qa',confidence:0.8,slots:{question:t},reason:'关键词'};
+  return {intent:'chitchat',confidence:0.5,slots:{},reason:'无法识别'};
+}
+
+async function classifyIntent(message, history){
+  if(!AI_BASE||!AI_KEY) return classifyByKeyword(message);
+  // 上下文预算：历史 + 当前问题，超 AI_CONTEXT_MAX 时保留最近轮
+  let hist=(history||[]).slice(-20);
+  let ctx=hist.map(x=>(x.role==='me'?'用户':'助手')+': '+String(x.text||'').slice(0,500)).join('\n');
+  if(ctx.length>AI_CONTEXT_MAX) ctx=ctx.slice(-AI_CONTEXT_MAX);
+  const messages=[
+    {role:'system',content:INTENT_SYS},
+    {role:'user',content:(ctx?('近期对话：\n'+ctx+'\n\n'):'')+'当前输入：'+message}
+  ];
+  try{
+    const r=await fetch(AI_BASE+'/chat/completions',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+AI_KEY},
+      body:JSON.stringify({model:AI_MODEL,response_format:{type:'json_object'},messages}),
+      signal: AbortSignal.timeout(8000)
+    });
+    const d=await r.json();
+    const raw=(d.choices?.[0]?.message?.content||'').replace(/```json|```/g,'').trim();
+    const obj=JSON.parse(raw);
+    if(!obj.intent || !['record','start','wrap','qa','chitchat'].includes(obj.intent)) throw new Error('bad intent');
+    return obj;
+  }catch(e){
+    return classifyByKeyword(message);
+  }
+}
+
 // 确保 skills 表存在（兼容旧库）
 try{ db.exec(`CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, content TEXT, status TEXT DEFAULT 'active', created_at TEXT, updated_at TEXT)`); }catch(e){}
 // 旧库平滑加列（幂等）
@@ -401,26 +542,74 @@ async function handle(req,res){
     const text=data.choices?.[0]?.message?.content||'（无返回）';
     return json(res,200,{answer:text});
   }
+  // ===== Agent 对话（意图识别 + 确定性执行）=====
+  if (p==='/api/agent/chat' && method==='POST'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    const b=await readBody(req);
+    const message=String(b.message||'').trim();
+    if(!message) return json(res,400,{detail:'消息不能为空'});
+    let intent;
+    if(b.preset_intent && ['record','start','wrap','qa'].includes(b.preset_intent)){
+      // 快捷指令：跳过 LLM，纯确定性
+      intent={intent:b.preset_intent,confidence:1,slots:b.slots||{},reason:'快捷指令'};
+      if(b.preset_intent==='record'){
+        const qm=message.replace(/^(今天的计划是|记一下|记录一下|加个任务|新增)/,'').replace(/^[：:，,\s]+/,'').trim();
+        intent.slots={target:'task',items:[{'任务名称':qm||message}]};
+      }
+    } else {
+      intent=await classifyIntent(message,b.history);
+    }
+    const conf=Number(intent.confidence)||0;
+    if(intent.intent==='record' && conf<0.6){
+      return json(res,200,{ok:false,intent:'unclear',reply:'没太确定要记什么，能说得更具体一点吗？（比如「记一下：明天下午开会」）',need_confirm:true});
+    }
+    let reply='', data={}, audit_ids=[];
+    if(intent.intent==='record'){
+      const r=agentRecord(intent.slots);
+      data.created=r.created;
+      audit_ids=r.created.map(x=>x._audit_id).filter(Boolean);
+      const lines=r.created.map((x,i)=>(i+1)+'. '+Object.values(x).filter(v=>v&&typeof v==='string'&&!v.startsWith('t_')).slice(0,3).join(' / '));
+      reply='已记下 '+r.created.length+' 条：\n'+(lines.join('\n')||'（无）')+
+            (r.errors.length?'\n未写入：'+r.errors.join('；'):'')+'\n数据已保存，稍后同步到其他端。';
+    } else if(intent.intent==='start'){
+      const t=computeTop3();
+      data.top3=t.关键3件; data.summary={未完成:t.未完成总数,逾期:t.逾期数};
+      const lines=t.关键3件.map((x,i)=>(i+1)+'. ['+x.优先级+'] '+x.任务+'（'+(x.状态||'待办')+'，'+x.分数+'分）');
+      reply='当前最重要的 3 件事：\n'+(lines.join('\n')||'暂无逾期或今日到期事项')+
+            '\n未完成 '+t.未完成总数+' 项，其中逾期 '+t.逾期数+' 项。';
+    } else if(intent.intent==='wrap'){
+      const rv=computeReview();
+      data.summary=rv;
+      reply=rv.一句话+'\n完成：'+(rv.今日完成.join('、')||'无')+'。';
+    } else if(intent.intent==='qa'){
+      if(!AI_BASE||!AI_KEY) return json(res,503,{detail:'AI 未配置'});
+      const sys='你是潮汐工作台助手。只使用提供的记录回答，字段为空就说空，绝不编造任务、日期或数值。';
+      const resp=await callAI([{role:'system',content:sys+'\n\n'+buildContext(message)},{role:'user',content:message}],false);
+      const d=await resp.json();
+      reply=d.choices?.[0]?.message?.content||'（无返回）';
+      data.answer=reply;
+    } else {
+      reply='我是潮汐，你的时间与精力助手。可以说「开工」看今天重点，或直接告诉我今天的计划，我帮你记下来。';
+    }
+    return json(res,200,{ok:true,intent:intent.intent,confidence:conf,reply,data,audit_ids,undoable:audit_ids.length>0});
+  }
+  if (p==='/api/agent/undo' && method==='POST'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    const b=await readBody(req), aid=b.audit_id;
+    const row=db.prepare('SELECT detail FROM audit_log WHERE id=?').get(aid);
+    if(!row) return json(res,404,{detail:'未找到该操作'});
+    let det; try{ det=JSON.parse(row.detail); }catch(e){ return json(res,400,{detail:'操作记录格式错误'}); }
+    if(det.undone) return json(res,200,{ok:true,undone:0,note:'已撤销过'});
+    let n=0;
+    (det.created||[]).forEach(c=>{ if(deleteRecord(c.table,c.record_id,'agent')) n++; });
+    db.prepare('UPDATE audit_log SET detail=? WHERE id=?').run(JSON.stringify(Object.assign(det,{undone:1})),aid);
+    return json(res,200,{ok:true,undone:n});
+  }
+
   if (p==='/api/ai/actions/top3' && method==='POST'){
     if(!auth(req)) return json(res,401,{detail:'未登录'});
-    // 确定性打分（与 analyze_plan.py 同口径）：P0=100/P1=60/P2=30，逾期每天+4(上限60)，今日+50，进行中+20
-    const today=new Date().toISOString().slice(0,10);
-    const rows=db.prepare(`SELECT * FROM ${q('task')}`).all()
-      .filter(r=>r['状态']!=='已完成');
-    const cand=rows.filter(r=>{
-      const due=(r['到期日']||'').slice(0,10), plan=(r['计划日']||'').slice(0,10);
-      return (due&&due<today)||plan===today;
-    }).map(r=>{
-      const due=(r['到期日']||'').slice(0,10);
-      const over=due&&due<today?Math.min(60,Math.floor((new Date(today)-new Date(due))/86400000)*4):0;
-      const base={'P0':100,'P1':60,'P2':30}[r['优先级']]||0;
-      const dueBonus=(r['到期日']||'').slice(0,10)===today?50:0;
-      const doing=r['状态']==='进行中'?20:0;
-      return {任务:(r['任务名称']||'')+(r['事项二']?' › '+r['事项二']:''),
-        优先级:r['优先级']||'',状态:r['状态']||'',到期日:due,计划日:(r['计划日']||'').slice(0,10),
-        分数:base+over+dueBonus+doing};
-    }).sort((a,b)=>b.分数-a.分数).slice(0,3);
-    return json(res,200,{最关键3件:cand});
+    const t=computeTop3();
+    return json(res,200,{最关键3件:t.关键3件});
   }
 
   return json(res,404,{detail:'Not Found'});
