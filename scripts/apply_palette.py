@@ -6,7 +6,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 SRC = REPO / "web" / "workboard.fusion.html"
 html = SRC.read_text(encoding="utf-8")
 
-if 'data-palette="teal"' in html:
+if 'data-palette: teal' in html:
     print("已换色，跳过")
     raise SystemExit(0)
 
@@ -17,7 +17,7 @@ old_root = ''':root{
   --sage:#627a67;--sage-soft:#dfe8df;--sand:#a57c45;--sand-soft:#eee2ce;
   --red:#b44d43;--green:#477358;--shadow:0 16px 40px rgba(63,48,36,.07);--radius:22px;--sidebar:248px
 }'''
-new_root = ''':root data-palette="teal">
+new_root = ''':root{ /* data-palette: teal */
   --paper:#eef5f4;--card:#fbfdfc;--ink:#123b3b;--muted:#4e7b78;--line:#cfe3df;
   --plum:#0e7c7b;--plum-soft:#d6eeea;--terra:#e07a5f;--terra-soft:#fbe4dc;
   --sage:#0e7c7b;--sage-soft:#d6eeea;--sand:#c98a3c;--sand-soft:#f7e9d2;
