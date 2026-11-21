@@ -29,8 +29,12 @@ if grep -q '^WB_ADMIN_PASSWORD=CHANGE_ME' "$APP_DIR/config/workboard.env"; then
 fi
 
 echo "==> [3/6] 同步后端代码"
-cp "$REPO/server.js" "$APP_DIR/server.js"
-echo "    server.js 已更新"
+if [ "$REPO/server.js" = "$APP_DIR/server.js" ]; then
+  echo "    仓库即运行目录，server.js 无需复制"
+else
+  cp "$REPO/server.js" "$APP_DIR/server.js"
+  echo "    server.js 已更新"
+fi
 
 echo "==> [4/6] 同步 H5 页面"
 sudo mkdir -p "$WEB_DIR"
