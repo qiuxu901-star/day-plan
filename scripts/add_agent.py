@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+raise SystemExit("DEPRECATED: Agent 代码已直接落入 workboard.fusion.html，本注入器不再使用")
 """给 workboard.fusion.html 注入 Agent 首页（鲸鱼对话 + 下方仪表盘）。幂等。"""
 import pathlib
 

@@ -655,62 +655,76 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
     .cal-lg-tip{display:none}
   }
 
-  /* ===== TIDE Agent Dock（scoped，不影响其他页面） ===== */
-  .view#view-dashboard{display:flex;flex-direction:column;padding-bottom:0}
-  .agent-dock{
-    --deep-1:#0b2330; --deep-2:#14515d; --deep-3:#2c8b86;
-    --foam:#eaf6f2; --ink-on:#f3efe6; --muted-on:#a9c9c6;
-    position:relative;flex:0 0 auto;height:clamp(300px,42vh,460px);
-    display:flex;flex-direction:column;overflow:hidden;
-    border-radius:0 0 var(--radius) var(--radius);
-    background:linear-gradient(135deg,var(--deep-1),var(--deep-2) 55%,var(--deep-3));
-    color:var(--ink-on);box-shadow:0 18px 44px rgba(11,35,48,.22);
-  }
-  .agent-waves{position:absolute;inset:0;pointer-events:none;opacity:.55}
-  .agent-waves svg{position:absolute;bottom:-8px;left:0;width:200%;height:90px}
-  .agent-hero{position:relative;display:flex;align-items:center;gap:14px;padding:16px 20px 6px;flex:0 0 auto}
-  .agent-hero .whale{width:190px;height:105px;flex:none;filter:drop-shadow(0 8px 16px rgba(0,0,0,.25))}
+  /* ===== TIDE Agent · 浅色独立页（显示只由 .view/.view.active 控制） ===== */
+  .view.view-agent.active{display:flex;flex-direction:column;
+    height:calc(100dvh - var(--topbar-h,104px));min-height:520px;overflow:hidden}
+  .agent-dock{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;
+    background:var(--paper);color:var(--ink);position:relative}
+  .agent-dock svg{stroke:none}                 /* 抵消全局 svg{stroke:currentColor} */
+  .agent-waves{position:absolute;inset:0;pointer-events:none;opacity:.18}
+  .agent-waves svg{position:absolute;bottom:0;left:0;width:100%;height:64px}
+  .agent-hero{position:relative;display:flex;align-items:center;gap:12px;padding:18px 24px 6px;flex:0 0 auto}
+  .agent-hero .whale{width:64px;height:40px;flex:none}
+  .agent-dock .wb-spout{stroke:var(--sage);stroke-width:2.5;fill:none;stroke-linecap:round}
   .agent-intro{min-width:0}
-  .agent-kicker{font-size:11px;letter-spacing:.18em;color:#7fd3c4;text-transform:uppercase}
-  .agent-greet{font-family:"Songti SC",serif;font-size:25px;font-weight:600;margin:4px 0 2px;line-height:1.25}
-  .agent-sub{font-size:12px;color:var(--muted-on)}
-  .agent-thread{position:relative;flex:1 1 auto;overflow-y:auto;padding:8px 20px;display:flex;flex-direction:column;gap:8px;scroll-behavior:smooth}
-  .agent-bubble{max-width:82%;padding:9px 13px;border-radius:14px;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
-  .agent-bubble.me{align-self:flex-end;background:rgba(127,211,196,.9);color:#0b2330;border-bottom-right-radius:4px}
-  .agent-bubble.ai{align-self:flex-start;background:rgba(255,255,255,.1);color:var(--foam);border:1px solid rgba(127,211,196,.25);border-bottom-left-radius:4px}
-  .agent-bubble .undo{margin-left:10px;padding:2px 8px;border:1px solid rgba(127,211,196,.5);border-radius:6px;background:transparent;color:#7fd3c4;font-size:11px;cursor:pointer}
-  .agent-top3{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
-  .agent-top3 span{padding:3px 8px;border-radius:8px;background:rgba(127,211,196,.16);font-size:11px}
+  .agent-kicker{font-size:11px;letter-spacing:.16em;color:var(--terra);text-transform:uppercase}
+  .agent-sub{font-size:13px;color:var(--muted);margin-top:3px}
+  .agent-thread{position:relative;flex:1 1 auto;min-height:0;overflow-y:auto;
+    padding:16px 24px;display:flex;flex-direction:column;gap:12px;scroll-behavior:smooth}
+  .agent-bubble{max-width:92%;padding:12px 16px;border-radius:16px;
+    font-size:15.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
+  .agent-bubble.me{align-self:flex-end;background:var(--sage-soft);color:var(--ink);
+    border:1px solid var(--sage);border-bottom-right-radius:5px}
+  .agent-bubble.ai{align-self:flex-start;background:var(--card);color:var(--ink);
+    border:1px solid var(--line);border-bottom-left-radius:5px}
+  .agent-bubble .undo{margin-left:10px;padding:3px 9px;border:1px solid var(--terra);
+    border-radius:6px;background:transparent;color:var(--terra);font-size:12px;cursor:pointer}
+  .agent-top3{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .agent-top3 span{padding:5px 10px;border-radius:8px;background:var(--terra-soft);
+    color:var(--terra);font-size:12px}
   .agent-typing{display:flex;gap:4px;padding:10px 2px}
-  .agent-typing i{width:6px;height:6px;border-radius:50%;background:#7fd3c4;animation:wbtyp 1.1s infinite ease-in-out}
+  .agent-typing i{width:6px;height:6px;border-radius:50%;background:var(--sage);animation:wbtyp 1.1s infinite ease-in-out}
   .agent-typing i:nth-child(2){animation-delay:.15s}.agent-typing i:nth-child(3){animation-delay:.3s}
   @keyframes wbtyp{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-4px)}}
-  .agent-quick{position:relative;display:flex;gap:8px;padding:4px 20px 8px;flex-wrap:wrap;flex:0 0 auto}
-  .agent-quick button{padding:6px 13px;border:1px solid rgba(127,211,196,.4);border-radius:18px;background:rgba(255,255,255,.06);color:var(--foam);font-size:12px;cursor:pointer;transition:.2s}
-  .agent-quick button:hover{background:rgba(127,211,196,.2);border-color:#7fd3c4}
-  .agent-composer{position:relative;display:flex;gap:8px;padding:0 20px 16px;flex:0 0 auto}
-  .agent-composer input{flex:1;padding:11px 14px;border:1px solid rgba(127,211,196,.35);border-radius:12px;background:rgba(255,255,255,.1);color:var(--foam);font-size:13px;outline:none}
-  .agent-composer input::placeholder{color:var(--muted-on)}
-  .agent-composer input:focus{border-color:#7fd3c4}
-  .agent-composer button{padding:0 20px;border:0;border-radius:12px;background:#7fd3c4;color:#0b2330;font-weight:600;font-size:13px;cursor:pointer}
-  .dash-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;padding:18px 2px 40px}
-  /* 鲸鱼动画 */
+  .agent-quick{position:relative;display:flex;gap:8px;padding:4px 24px 10px;flex-wrap:wrap;flex:0 0 auto}
+  .agent-quick button{padding:7px 15px;border:1px solid var(--line);border-radius:18px;
+    background:var(--card);color:var(--ink);font-size:13px;cursor:pointer;transition:.2s}
+  .agent-quick button:hover{border-color:var(--terra);background:var(--terra-soft)}
+  .agent-composer{position:sticky;bottom:0;display:flex;gap:8px;padding:12px 24px 20px;
+    flex:0 0 auto;background:var(--paper)}
+  .agent-composer input{flex:1;padding:12px 15px;border:1px solid var(--line);border-radius:12px;
+    background:var(--card);color:var(--ink);font-size:14px;outline:none}
+  .agent-composer input::placeholder{color:var(--muted)}
+  .agent-composer input:focus{border-color:var(--terra)}
+  .agent-composer button{padding:0 22px;border:0;border-radius:12px;background:var(--terra);
+    color:#fff;font-weight:600;font-size:14px;cursor:pointer}
+  /* 技能草稿预览卡 */
+  .skill-preview{border:1px solid var(--line);border-left:3px solid var(--terra);
+    background:var(--card);border-radius:14px;padding:14px 16px;margin-top:10px;
+    max-width:92%;align-self:flex-start;width:92%}
+  .skill-preview h4{margin:0 0 6px;font-size:15px;color:var(--terra)}
+  .skill-preview .sp-desc{font-size:13px;color:var(--muted);margin-bottom:10px}
+  .skill-preview textarea{width:100%;box-sizing:border-box;min-height:180px;
+    font:13px/1.6 ui-monospace,monospace;border:1px solid var(--line);
+    border-radius:8px;padding:10px;background:#faf6ef;color:var(--ink)}
+  .sp-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
+  .sp-ok{background:var(--terra);color:#fff;border:0;border-radius:9px;padding:8px 16px;cursor:pointer;font-size:13px}
+  .sp-cancel{border:1px solid var(--line);background:var(--card);border-radius:9px;padding:8px 16px;cursor:pointer;font-size:13px}
+  /* 鲸鱼动画（克制） */
   .wb-whale{transform-origin:180px 150px;animation:wb-breathe 4.5s ease-in-out infinite alternate}
-  @keyframes wb-breathe{from{transform:translateY(0) scaleY(1)}to{transform:translateY(-4px) scaleY(1.025)}}
-  .wb-wave{animation:wb-drift 9s linear infinite}
-  .wb-wave-b{animation-duration:13s;animation-direction:reverse}
-  @keyframes wb-drift{to{transform:translateX(-90px)}}
+  @keyframes wb-breathe{from{transform:translateY(0)}to{transform:translateY(-3px)}}
   .wb-spout{animation:wb-spout 4.5s ease-in-out infinite}
   @keyframes wb-spout{0%,60%{opacity:0}75%{opacity:.9}100%{opacity:0}}
-  @media (prefers-reduced-motion:reduce){.wb-whale,.wb-wave,.wb-spout{animation:none}}
+  @media (prefers-reduced-motion:reduce){.wb-whale,.wb-spout{animation:none}}
   @media (max-width:860px){
-    .view#view-dashboard{display:block}
-    .agent-dock{height:auto;min-height:360px;border-radius:16px;margin-bottom:12px}
-    .agent-hero .whale{width:130px;height:74px}
-    .agent-greet{font-size:21px}
-    .dash-scroll{overflow:visible;padding:0}
+    .view.view-agent.active{height:auto;min-height:calc(100dvh - 68px)}
+    .agent-hero .whale{width:48px;height:30px}
+    .agent-thread{padding:12px 14px}
+    .agent-composer{padding:10px 14px 16px}
+    .agent-quick{padding:4px 14px 8px}
+    .agent-bubble{max-width:100%;font-size:15px}
+    .skill-preview{max-width:100%;width:100%}
   }
-
 </style>
 </head>
 <body data-page-node-id="hwziI2PCj4FjvP8nQPS6mO">
@@ -721,7 +735,8 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
     <div class="brand" data-page-node-id="Wj6DbvUBvMtBdTE3zTVnDK"><strong data-page-node-id="ZzBp8XxHUwHjPEnPiULiVT">工作计划台</strong><span data-page-node-id="Ra2FGEK73HlUHq4nkd2cxV">DAY PLAN · REVIEW · PROGRESS</span></div>
   </div>
   <nav class="side-nav" id="sideNav" data-page-node-id="xqOc1KxCga3RmK8gb0IbAQ">
-    <button class="nav-item active" data-view="dashboard" data-page-node-id="J0EwHhyT9HjAsnHKkF2ZEx"><svg data-page-node-id="5Cc2nJJVOoLqDjhAEbXBBA"><path d="M3 11l9-8 9 8M5 9v11h14V9" data-page-node-id="4R0Nv6QIlZeETL2A04fga1"/></svg>仪表盘</button>
+    <button class="nav-item active" data-view="agent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12c3-4 9-4 12 0 3 4-3 7-6 7s-9-3-6-7z"/><circle cx="9" cy="12" r="1"/></svg>Agent</button>
+  <button class="nav-item" data-view="dashboard" data-page-node-id="J0EwHhyT9HjAsnHKkF2ZEx"><svg data-page-node-id="5Cc2nJJVOoLqDjhAEbXBBA"><path d="M3 11l9-8 9 8M5 9v11h14V9" data-page-node-id="4R0Nv6QIlZeETL2A04fga1"/></svg>仪表盘</button>
     <button class="nav-item" data-view="task" data-page-node-id="IBbEia2yjn40CnMqK13a1D"><svg data-page-node-id="WqP35eBgUrMywtCxACWZeQ"><rect x="4" y="4" width="16" height="16" rx="4" data-page-node-id="cCgFvcA5dV55yT1KcFqxEL"/><path d="M8 12l3 3 5-6" data-page-node-id="J12d0RwDXNRZrCcyYumMtm"/></svg>计划</button>
     <button class="nav-item" data-view="week" data-page-node-id="wkNavSide01"><svg data-page-node-id="wkNavSide02"><path d="M9 11l3 3L22 4" data-page-node-id="wkNavSide03"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" data-page-node-id="wkNavSide04"/></svg>全局</button>
     <button class="nav-item" data-view="calendar" data-page-node-id="calNavSide1"><svg data-page-node-id="calNavSide2"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>日历</button>
@@ -749,56 +764,8 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   <div class="banner" id="errorBanner" role="alert" data-page-node-id="V9tjTjXbwln1mpG15gxhIC"><span class="msg" id="errorMsg" data-page-node-id="ncCBPIqIdacE0EMiRlcU51"></span><button id="btnRetry" data-page-node-id="CWRVCEb30L9MxjFCBtGjhz">重试</button></div>
 
   <!-- 总览 -->
-  <section class="view active" id="view-dashboard" data-page-node-id="4o1FqEJ5ctKl8tzO1JoKE7">
+  <section class="view" id="view-dashboard" data-page-node-id="4o1FqEJ5ctKl8tzO1JoKE7">
 
-  <div class="agent-dock" id="agentDock">
-    <div class="agent-waves" aria-hidden="true">
-      <svg viewBox="0 0 720 90" preserveAspectRatio="none"><path d="M0 45 Q90 20 180 45 T360 45 T540 45 T720 45 V90 H0 Z" fill="#2c8b86" opacity=".25"/></svg>
-    </div>
-    <div class="agent-hero">
-      <svg class="whale" viewBox="0 0 360 200" role="img" aria-label="潮汐鲸鱼助手">
-        <defs>
-          <linearGradient id="wbWhaleBody" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stop-color="#7fd3c4"/><stop offset=".5" stop-color="#2c8b86"/><stop offset="1" stop-color="#123c4a"/>
-          </linearGradient>
-          <linearGradient id="wbWave" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0" stop-color="#2c8b86" stop-opacity=".7"/><stop offset="1" stop-color="#7fd3c4" stop-opacity=".35"/>
-          </linearGradient>
-          <radialGradient id="wbGlow"><stop offset="0" stop-color="#7fd3c4" stop-opacity=".35"/><stop offset="1" stop-color="#7fd3c4" stop-opacity="0"/></radialGradient>
-        </defs>
-        <ellipse cx="180" cy="110" rx="150" ry="80" fill="url(#wbGlow)"/>
-        <g class="wb-whale">
-          <path d="M42 118 C70 64 168 52 234 96 C256 112 270 128 302 116 C294 140 272 150 250 144 C218 170 128 172 80 150 C58 140 46 132 42 118 Z" fill="url(#wbWhaleBody)"/>
-          <path d="M300 116 C324 94 340 90 354 94 C338 106 332 122 332 138 C320 128 310 122 300 116 Z" fill="url(#wbWhaleBody)"/>
-          <path d="M150 146 C160 170 184 180 206 175 C189 159 177 151 168 143 Z" fill="#14515d" opacity=".85"/>
-          <circle cx="104" cy="108" r="3.4" fill="#eaf6f2"/><circle cx="105" cy="107" r="1.1" fill="#0b2330"/>
-          <path d="M96 122 Q112 130 128 120" stroke="#eaf6f2" stroke-opacity=".6" stroke-width="2" fill="none" stroke-linecap="round"/>
-        </g>
-        <g class="wb-spout" stroke="#eaf6f2" stroke-width="3" fill="none" stroke-linecap="round">
-          <path d="M92 66 Q84 44 96 26"/><path d="M100 64 Q100 40 112 22"/><path d="M108 66 Q116 46 130 32"/>
-        </g>
-        <path class="wb-wave" d="M0 158 Q45 144 90 158 T180 158 T270 158 T360 158 V200 H0 Z" fill="url(#wbWave)"/>
-        <path class="wb-wave wb-wave-b" d="M0 172 Q45 158 90 172 T180 172 T270 172 T360 172 V200 H0 Z" fill="#0b2330" opacity=".45"/>
-      </svg>
-      <div class="agent-intro">
-        <div class="agent-kicker">TIDE · 你的工作搭子</div>
-        <div class="agent-greet">今天，想从哪里开始？</div>
-        <div class="agent-sub">说一句「开工」看重点，或直接告诉我今天的计划。</div>
-      </div>
-    </div>
-    <div class="agent-thread" id="agentThread" role="log" aria-live="polite"></div>
-    <div class="agent-quick" id="agentQuick">
-      <button data-q="start">⚡ 开工</button>
-      <button data-q="record">＋ 记一笔</button>
-      <button data-q="wrap">✓ 收工</button>
-      <button data-q="qa">今天怎么样</button>
-    </div>
-    <form class="agent-composer" id="agentForm">
-      <input id="agentInput" placeholder="说一句话，比如：今天的计划是……" autocomplete="off">
-      <button id="agentSend" type="submit">发送</button>
-    </form>
-  </div>
-  <div class="dash-scroll">
     <div class="hero-card" data-page-node-id="rVBnvAbKsMV6UxaI0g9QH3">
       <h2 data-page-node-id="yrmziZouMzx11iGRfjB64t">今日聚焦</h2>
       <p class="hero-sub" id="focusHint" data-page-node-id="QU7Njn3xYkWGYFszUXea7l"></p>
@@ -828,6 +795,55 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
       <button class="mini-btn" id="dimReset" data-page-node-id="dimResetBtn">重置布局</button>
     </div>
     <div class="dim-wall" id="dimWall" data-page-node-id="dimWallWrap1"></div>
+  </section>
+
+  <!-- Agent · 独立页（默认） -->
+  <section class="view view-agent active" id="view-agent">
+  <div class="agent-dock" id="agentDock">
+    <div class="agent-waves" aria-hidden="true">
+      <svg viewBox="0 0 720 90" preserveAspectRatio="none"><path d="M0 45 Q90 20 180 45 T360 45 T540 45 T720 45 V90 H0 Z" fill="#2c8b86" opacity=".25"/></svg>
+    </div>
+    <div class="agent-hero">
+      <svg class="whale" viewBox="0 0 360 200" role="img" aria-label="潮汐鲸鱼助手">
+        <defs>
+          <linearGradient id="wbWhaleBody" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#7fd3c4"/><stop offset=".5" stop-color="#2c8b86"/><stop offset="1" stop-color="#123c4a"/>
+          </linearGradient>
+          <linearGradient id="wbWave" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="#2c8b86" stop-opacity=".7"/><stop offset="1" stop-color="#7fd3c4" stop-opacity=".35"/>
+          </linearGradient>
+          <radialGradient id="wbGlow"><stop offset="0" stop-color="#7fd3c4" stop-opacity=".35"/><stop offset="1" stop-color="#7fd3c4" stop-opacity="0"/></radialGradient>
+        </defs>
+        <ellipse cx="180" cy="110" rx="150" ry="80" fill="url(#wbGlow)"/>
+        <g class="wb-whale">
+          <path d="M42 118 C70 64 168 52 234 96 C256 112 270 128 302 116 C294 140 272 150 250 144 C218 170 128 172 80 150 C58 140 46 132 42 118 Z" fill="url(#wbWhaleBody)"/>
+          <path d="M300 116 C324 94 340 90 354 94 C338 106 332 122 332 138 C320 128 310 122 300 116 Z" fill="url(#wbWhaleBody)"/>
+          <path d="M150 146 C160 170 184 180 206 175 C189 159 177 151 168 143 Z" fill="#14515d" opacity=".85"/>
+          <circle cx="104" cy="108" r="3.4" fill="#eaf6f2"/><circle cx="105" cy="107" r="1.1" fill="#0b2330"/>
+          <path d="M96 122 Q112 130 128 120" stroke="#eaf6f2" stroke-opacity=".6" stroke-width="2" fill="none" stroke-linecap="round"/>
+        </g>
+        <g class="wb-spout" stroke="#eaf6f2" stroke-width="3" fill="none" stroke-linecap="round">
+          <path d="M92 66 Q84 44 96 26"/><path d="M100 64 Q100 40 112 22"/><path d="M108 66 Q116 46 130 32"/>
+        </g>
+        <path class="wb-wave" d="M0 158 Q45 144 90 158 T180 158 T270 158 T360 158 V200 H0 Z" fill="var(--sage)" opacity=".25"/>
+        <path class="wb-wave wb-wave-b" d="M0 172 Q45 158 90 172 T180 172 T270 172 T360 172 V200 H0 Z" fill="#0b2330" opacity=".45"/>
+      </svg>
+      <div class="agent-intro">
+        <div class="agent-kicker">TIDE · 你的工作搭子</div>
+        <div class="agent-sub">说一句「开工」看重点，或直接告诉我今天的计划。</div>
+      </div>
+    </div>
+    <div class="agent-thread" id="agentThread" role="log" aria-live="polite"></div>
+    <div class="agent-quick" id="agentQuick">
+      <button data-q="start">⚡ 开工</button>
+      <button data-q="record">＋ 记一笔</button>
+      <button data-q="wrap">✓ 收工</button>
+      <button data-q="qa">今天怎么样</button>
+    </div>
+    <form class="agent-composer" id="agentForm">
+      <input id="agentInput" placeholder="说一句话，比如：今天的计划是……" autocomplete="off">
+      <button id="agentSend" type="submit">发送</button>
+    </form>
   </div>
   </section>
 
@@ -1171,7 +1187,8 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 
 <!-- 移动端底部导航 -->
 <nav class="mobile-nav" id="mobileNav" data-page-node-id="42jrsPGYlv6fn3yoI7tB1m">
-  <button class="active" data-view="dashboard" data-page-node-id="Ljk90E6QO5TVAQN1dIWNVl"><svg data-page-node-id="Rjd9YCIwVKlewBbXQOjdcJ"><path d="M3 11l9-8 9 8M5 9v11h14V9" data-page-node-id="hDyba8okcocZqKX7OMml2X"/></svg>仪表盘</button>
+  <button class="active" data-view="agent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12c3-4 9-4 12 0 3 4-3 7-6 7s-9-3-6-7z"/><circle cx="9" cy="12" r="1"/></svg>Agent</button>
+  <button data-view="dashboard" data-page-node-id="Ljk90E6QO5TVAQN1dIWNVl"><svg data-page-node-id="Rjd9YCIwVKlewBbXQOjdcJ"><path d="M3 11l9-8 9 8M5 9v11h14V9" data-page-node-id="hDyba8okcocZqKX7OMml2X"/></svg>仪表盘</button>
   <button data-view="task" data-page-node-id="83QlJ8qWhQsv0dvDfHkAca"><svg data-page-node-id="m8hwGgjeHJffK2nTJCm8im"><rect x="4" y="4" width="16" height="16" rx="4" data-page-node-id="y4MmX5jdZaST5fjAUkqdqJ"/><path d="M8 12l3 3 5-6" data-page-node-id="g9iFTUcy9pQ8yMPCmpGAML"/></svg>计划</button>
   <button data-view="week" data-page-node-id="wkNavMob01"><svg data-page-node-id="wkNavMob02"><path d="M9 11l3 3L22 4" data-page-node-id="wkNavMob03"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" data-page-node-id="wkNavMob04"/></svg>全局</button>
   <button data-view="calendar" data-page-node-id="calNavMob1"><svg data-page-node-id="calNavMob2"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>日历</button>
@@ -1204,7 +1221,7 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   var MILE_STATUSES = ['未开始', '进行中', '已完成'];
   var IB_TYPES = ['收集', '问题', '思考'];
   var IB_STATUSES = ['待处理', '已转任务', '已归档'];
-  var VIEW_TITLES = {dashboard:'今天，慢慢来', task:'日计划 · Day Plan', week:'全局 · 全部任务', calendar:'日历看板 · Month View', inbox:'收集箱 · Inbox', review:'每日复盘', milestone:'阶段进展', time:'时间记录', history:'历史追溯', keys:'APP Key 管理', skills:'技能管理'};
+  var VIEW_TITLES = {agent:'TIDE · 和鲸鱼聊聊', dashboard:'今天，慢慢来', task:'日计划 · Day Plan', week:'全局 · 全部任务', calendar:'日历看板 · Month View', inbox:'收集箱 · Inbox', review:'每日复盘', milestone:'阶段进展', time:'时间记录', history:'历史追溯', keys:'APP Key 管理', skills:'技能管理'};
 
   /* ========== 自托管数据层（替换平台 SDK，业务函数签名不变） ========== */
   var API_BASE = '/workboard/api';
@@ -3476,8 +3493,8 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
     });
     // 量 topbar 高度写入 flex 基准
     try{
-      var tb=document.querySelector('.topbar'), dv=$('view-dashboard');
-      if(tb&&dv) dv.style.setProperty('--topbar-h', tb.offsetHeight+'px');
+      var tb=document.querySelector('.topbar');
+      if(tb) document.documentElement.style.setProperty('--topbar-h', tb.offsetHeight+'px');
     }catch(e){}
   }
  /* ========== 视图切换 ========== */
@@ -3488,6 +3505,7 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
     Array.prototype.forEach.call(document.querySelectorAll('.nav-item'), function(b){ b.classList.toggle('active', b.getAttribute('data-view') === view); });
     Array.prototype.forEach.call(document.querySelectorAll('#mobileNav button'), function(b){ b.classList.toggle('active', b.getAttribute('data-view') === view); });
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (typeof wbOnViewChange === 'function') wbOnViewChange(view);
   }
 
   /* ========== select 选项填充 ========== */

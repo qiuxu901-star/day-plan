@@ -73,7 +73,9 @@ setTimeout(() => {
   checks.push(['鲸鱼SVG存在', !!d.querySelector('.wb-whale')]);
   checks.push(['快捷指令4个', d.querySelectorAll('#agentQuick button').length===4]);
   checks.push(['对话输入框存在', !!d.getElementById('agentInput')]);
-  checks.push(['仪表盘已包进dash-scroll', !!d.querySelector('.dash-scroll')]);
+  checks.push(['Agent为默认active页', !!d.querySelector('#view-agent.active')]);
+  checks.push(['无ID选择器劫持视图', !/\.view#view-[a-z]+\s*\{[^}]*display\s*:/.test(html)]);
+  checks.push(['仅一个active视图', d.querySelectorAll('.view.active').length===1]);
   checks.push(['新导航按钮存在', d.querySelectorAll('[data-view="keys"]').length>=2]);
 
   let pass = 0;
