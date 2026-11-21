@@ -1,0 +1,5 @@
+{
+  "base_url": "https://2566.online/workboard/api",
+  "password": "CHANGE_ME_ADMIN_PASSWORD",
+  "note": "复制到 ~/.workbuddy/workboard/config.json。改密码时同步修改本文件 password 与服务器 config/workboard.env 的 WB_ADMIN_PASSWORD，两处必须一致。脚本每次运行会自动登录换 token。"
+}

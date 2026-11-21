@@ -1,0 +1,18 @@
+[Unit]
+Description=WorkBoard API (Node 22 + SQLite)
+After=network.target
+
+[Service]
+Type=simple
+User=admin
+Group=admin
+WorkingDirectory=/home/admin/workboard
+EnvironmentFile=/home/admin/workboard/config/workboard.env
+ExecStart=/usr/local/node22/bin/node /home/admin/workboard/server.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
