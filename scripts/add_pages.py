@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""给 workboard.fusion.html 增加三个页面：APP Key 管理 / AI 生成 Key / 技能管理。
+"""给 workboard.fusion.html 增加三个页面：APP Key 管理 / 技能管理。
 在源文件上操作，幂等（重复运行会跳过已插入部分）。"""
 import pathlib
 
@@ -13,7 +13,6 @@ side_anchor = '''<button class="nav-item" data-view="review" data-page-node-id="
 side_end = '''  </nav>
   <div class="side-foot"'''
 side_new = '''    <button class="nav-item" data-view="keys"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8m-3 3l2 2m-5 1l2 2"/></svg>APP Key</button>
-    <button class="nav-item" data-view="aikey"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/><path d="M18 16l.7 1.8L20.5 18.5l-1.8.7L18 21l-.7-1.8-1.8-.7 1.8-.7L18 16z"/></svg>AI 生成 Key</button>
     <button class="nav-item" data-view="skills"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>技能管理</button>
   </nav>
   <div class="side-foot"'''
@@ -36,7 +35,7 @@ if html.count('data-view="keys"') == 1:  # 只有侧栏加了，移动还没
 
 # ---------- 3. VIEW_TITLES ----------
 old_titles = "var VIEW_TITLES = {dashboard:'今天，慢慢来', task:'日计划 · Day Plan', week:'全局 · 全部任务', calendar:'日历看板 · Month View', inbox:'收集箱 · Inbox', review:'每日复盘', milestone:'阶段进展', time:'时间记录', history:'历史追溯'};"
-new_titles = "var VIEW_TITLES = {dashboard:'今天，慢慢来', task:'日计划 · Day Plan', week:'全局 · 全部任务', calendar:'日历看板 · Month View', inbox:'收集箱 · Inbox', review:'每日复盘', milestone:'阶段进展', time:'时间记录', history:'历史追溯', keys:'APP Key 管理', aikey:'AI 对话生成 Key', skills:'技能管理'};"
+new_titles = "var VIEW_TITLES = {dashboard:'今天，慢慢来', task:'日计划 · Day Plan', week:'全局 · 全部任务', calendar:'日历看板 · Month View', inbox:'收集箱 · Inbox', review:'每日复盘', milestone:'阶段进展', time:'时间记录', history:'历史追溯', keys:'APP Key 管理', skills:'技能管理'};"
 if old_titles in html:
     html = html.replace(old_titles, new_titles, 1)
 
@@ -61,19 +60,6 @@ sections = '''
   </section>
 
   <!-- ===== AI 对话生成 Key ===== -->
-  <section class="view" id="view-aikey" style="padding:24px;max-width:900px">
-    <div class="panel" style="padding:20px">
-      <div class="panel-head"><h2 style="margin:0 0 6px">AI 对话生成 Key</h2><span class="hint" style="color:#9a9086;font-size:13px">用一句话说明用途，AI 判断权限并生成 · 删除/越权请求会被拒绝</span></div>
-      <div id="aiChatLog" style="min-height:180px;max-height:420px;overflow:auto;background:#faf7f2;border:1px solid #e6ddd2;border-radius:12px;padding:14px;margin:16px 0;display:flex;flex-direction:column;gap:10px">
-        <div style="color:#9a9086;font-size:13px">例如：「给我一个只读的 key，给手机上的快捷指令读取今天的计划」</div>
-      </div>
-      <div style="display:flex;gap:10px">
-        <input id="aiChatInput" placeholder="描述你需要的 Key..." style="flex:1;padding:11px 14px;border:1px solid #ddd3c6;border-radius:10px;background:#fff">
-        <button id="aiChatSend" style="padding:11px 20px;border:0;border-radius:10px;background:#8a6f52;color:#fff;cursor:pointer">发送</button>
-      </div>
-    </div>
-  </section>
-
   <!-- ===== 技能管理 ===== -->
   <section class="view" id="view-skills" style="padding:24px;max-width:1100px">
     <div class="panel" style="padding:20px">

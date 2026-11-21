@@ -28,16 +28,6 @@ js = r'''
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
     });
   }
-  function wbChatBubble(who, text, isKey){
-    var box=$('aiChatLog'); if(!box) return;
-    var d=document.createElement('div');
-    d.style.cssText='padding:10px 12px;border-radius:10px;max-width:88%;font-size:13px;line-height:1.6;'+
-      (who==='me'?'background:#8a6f52;color:#fff;align-self:flex-end':'background:#fff;color:#29241f');
-    d.innerHTML = isKey
-      ? '<div style="margin-bottom:6px">'+escHtml(text)+'</div><code style="word-break:break-all;font-size:12px">'+escHtml(isKey)+'</code>'
-      : escHtml(text);
-    box.appendChild(d); box.scrollTop=box.scrollHeight;
-  }
 
   function loadKeys(){
     if(!$('keyList')) return;
@@ -112,23 +102,6 @@ js = r'''
       if(navigator.clipboard) navigator.clipboard.writeText(t).then(function(){toast('已复制');});
       else toast('请手动复制',true);
     };
-    var send=$('aiChatSend');
-    if(send) send.onclick=function(){
-      var inp=$('aiChatInput'), msg=inp.value.trim(); if(!msg) return;
-      inp.value=''; wbChatBubble('me',msg);
-      wbChatBubble('ai','思考中...');
-      wbApi('/ai/create-key',{method:'POST',body:JSON.stringify({message:msg})})
-        .then(function(r){
-          var log=$('aiChatLog'); if(log.lastChild) log.removeChild(log.lastChild);
-          wbChatBubble('ai','已生成 '+r.scope+' 权限的 Key：',r.key);
-          loadKeys();
-        }).catch(function(e){
-          var log=$('aiChatLog'); if(log.lastChild) log.removeChild(log.lastChild);
-          wbChatBubble('ai','生成失败：'+e.message);
-        });
-    };
-    var aiInp=$('aiChatInput');
-    if(aiInp) aiInp.onkeydown=function(e){ if(e.key==='Enter') send.click(); };
     var snew=$('skillNew');
     if(snew) snew.onclick=function(){ openSkillEditor(null); };
     var scancel=$('skillCancel');

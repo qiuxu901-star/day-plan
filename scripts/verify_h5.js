@@ -66,7 +66,7 @@ setTimeout(() => {
   checks.push(['DOM有实际内容('+bodyLen+'字)', bodyLen > 200]);
   checks.push(['无JS运行时错误', errors.length === 0]);
   checks.push(['APP Key 页面存在', !!d.getElementById('view-keys')]);
-  checks.push(['AI生成Key页面存在', !!d.getElementById('view-aikey')]);
+  checks.push(['AI生成Key页面已回退', !d.getElementById('view-aikey')]);
   checks.push(['技能管理页面存在', !!d.getElementById('view-skills')]);
   checks.push(['新导航按钮存在', d.querySelectorAll('[data-view="keys"]').length>=2]);
 

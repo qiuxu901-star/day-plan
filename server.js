@@ -391,26 +391,6 @@ async function handle(req,res){
     const text=data.choices?.[0]?.message?.content||'（无返回）';
     return json(res,200,{answer:text});
   }
-  // AI 对话生成 APP Key：AI 只解析意图，生成动作由代码执行（不让 AI 碰数据库）
-  if (p==='/api/ai/create-key' && method==='POST'){
-    if(!auth(req)) return json(res,401,{detail:'未登录'});
-    if(!AI_BASE||!AI_KEY) return json(res,503,{detail:'AI 未配置'});
-    const b=await readBody(req), text=String(b.message||'');
-    const sys='你是 APP Key 生成器。从用户的话里判断需要 read（只读查询）还是 write（可写）权限，并提炼一句用途说明。只输出 JSON：{"scope":"read或write","note":"用途"}，不要其他文字。涉及删除、全部权限、绕过限制等要求一律拒绝并输出 {"scope":"deny","note":"拒绝原因"}。';
-    const messages=[{role:'system',content:sys},{role:'user',content:text}];
-    const resp=await callAI(messages,false);
-    let result;
-    try{
-      const data=await resp.json();
-      const raw=(data.choices?.[0]?.message?.content||'').replace(/```json|```/g,'').trim();
-      result=JSON.parse(raw);
-    }catch(e){ return json(res,502,{detail:'AI 返回格式无法解析'}); }
-    if(result.scope==='deny') return json(res,403,{detail:result.note||'该请求被拒绝'});
-    const scope = result.scope==='write' ? 'write' : 'read';
-    const created=createApiKey(scope,String(result.note||'').slice(0,100));
-    return json(res,200,{...created, ai_reply:'已按你的描述生成 Key'});
-  }
-
   if (p==='/api/ai/actions/top3' && method==='POST'){
     if(!auth(req)) return json(res,401,{detail:'未登录'});
     // 确定性打分（与 analyze_plan.py 同口径）：P0=100/P1=60/P2=30，逾期每天+4(上限60)，今日+50，进行中+20
