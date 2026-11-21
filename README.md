@@ -98,3 +98,13 @@ AI 端点在 `workboard.env` 的 `AI_BASE_URL / AI_API_KEY / AI_MODEL`，留空�
 ## 备份
 
 `/etc/cron.d/workboard-backup` 每日 03:30 用 sqlite3 `.backup` 生成快照，gzip 后保留 30 天。`data/` 与 `config/` 均不进 git，需单独备份。
+
+## HTTPS 证书自动续期
+
+域名 `2566.online` 无 ICP 备案，80 被拦，故用 **DNS-01** 验证（阿里云云解析）：
+
+- 密钥存服务器 `/home/admin/workboard/config/aliyun_dns.env`（600，不进 git）
+- `acme.sh` 在 `~/.acme.sh/`，阿里云插件 `dns_ali.sh`
+- 每天 03:10 由 `/etc/cron.d/acme-renew` 调 `scripts/acme_renew_job.sh`；acme.sh 仅在临期（约 30 天）才真续
+- 续期后钩子 `/usr/local/bin/acme_renew_hook.sh` 复制证书到 `/etc/letsencrypt/live/2566.online/` 并 reload nginx
+- 再授权：阿里云 RAM 子账号需 `AliyunDNSFullAccess` 权限（否则报 `Forbidden.RAM`）
