@@ -63,8 +63,16 @@ js = r'''
       rows.forEach(function(s){
         var d=document.createElement('div');
         d.style.cssText='padding:14px;border:1px solid #e6ddd2;border-radius:12px;background:#fff;cursor:pointer;transition:.2s';
+        var scripts=[]; try{ scripts=Object.keys(JSON.parse(s.scripts_json||'{}')); }catch(e){}
+        var related=[]; try{ related=JSON.parse(s.related_json||'[]'); }catch(e){}
+        var bodyLen=(s.content||'').length;
+        var warn = (s.name==='workboard-database-write')
+          ? '<div style="font-size:11px;color:#b44d43;margin-top:6px">⚠ 待校准：正文写平台旧版，双轨期保留原文</div>' : '';
         d.innerHTML='<div style="font-weight:600;margin-bottom:6px">'+escHtml(s.name)+'</div>'+
           '<div style="font-size:12px;color:#9a9086;line-height:1.5">'+escHtml(s.description||'（无描述）')+'</div>'+
+          '<div style="font-size:11px;color:#627a67;margin-top:6px">正文 '+bodyLen+' 字 · 脚本 '+scripts.length+' 个</div>'+
+          (related.length?'<div style="font-size:11px;color:#8a6f52;margin-top:4px">相关：'+related.map(function(r){return escHtml(r.replace("workboard-",""));}).join('、')+'</div>':'')+
+          warn+
           '<div style="font-size:11px;color:#b0a69b;margin-top:8px">更新 '+(s.updated_at||'').slice(0,10)+'</div>';
         d.onclick=function(){ openSkillEditor(s); };
         box.appendChild(d);
@@ -78,6 +86,13 @@ js = r'''
     $('skillName').value = s ? (s.name||'') : '';
     $('skillDesc').value = s ? (s.description||'') : '';
     $('skillContent').value = s ? (s.content||'') : '';
+    var preview=$('skillScripts');
+    if(preview){
+      var files=[]; try{ files=Object.keys(JSON.parse((s&&s.scripts_json)||'{}')); }catch(e){}
+      preview.innerHTML = files.length
+        ? '<b style="color:#8a6f52">附带脚本：</b>'+files.map(function(f){return escHtml(f);}).join(' · ')
+        : '';
+    }
     $('skillEditor').style.display='flex';
   }
 

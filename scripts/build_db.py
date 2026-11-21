@@ -123,7 +123,8 @@ def create_meta_tables(conn):
       CREATE TABLE IF NOT EXISTS skills (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT,
         content TEXT, status TEXT DEFAULT 'active',
-        created_at TEXT, updated_at TEXT
+        created_at TEXT, updated_at TEXT,
+        scripts_json TEXT, related_json TEXT, source_sha TEXT
       );
     """)
 

@@ -222,6 +222,13 @@ function createApiKey(scope, note){
 }
 // 确保 skills 表存在（兼容旧库）
 try{ db.exec(`CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, content TEXT, status TEXT DEFAULT 'active', created_at TEXT, updated_at TEXT)`); }catch(e){}
+// 旧库平滑加列（幂等）
+try{
+  const exist = new Set(db.prepare('PRAGMA table_info(skills)').all().map(r=>r.name));
+  ['scripts_json','related_json','source_sha'].forEach(c=>{
+    if(!exist.has(c)) db.exec('ALTER TABLE skills ADD COLUMN '+c+' TEXT');
+  });
+}catch(e){ console.error('skills 加列失败:',e.message); }
 
 // ---------- 路由 ----------
 async function handle(req,res){
@@ -279,10 +286,13 @@ async function handle(req,res){
     const id=p.split('/')[3], b=await readBody(req);
     const cur=db.prepare('SELECT * FROM skills WHERE id=?').get(id);
     if(!cur) return json(res,404,{detail:'技能不存在'});
-    const fields=['name','description','content','status'].filter(k=>b[k]!==undefined);
+    const fields=['name','description','content','status','scripts_json','related_json'].filter(k=>b[k]!==undefined);
     if(fields.length){
       const sets=fields.map(k=>k+'=?').join(',');
-      db.prepare(`UPDATE skills SET ${sets}, updated_at=? WHERE id=?`).run(...fields.map(k=>String(b[k])),now(),id);
+      const vals=fields.map(k=>String(b[k]));
+      const extra = fields.includes('content')
+        ? ", source_sha='"+crypto.createHash('sha256').update(String(b.content)).digest('hex')+"'" : "";
+      db.prepare(`UPDATE skills SET ${sets}${extra}, updated_at=? WHERE id=?`).run(...vals,now(),id);
     }
     return json(res,200,{updated:fields.length});
   }

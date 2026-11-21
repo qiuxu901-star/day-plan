@@ -72,9 +72,10 @@ sections = '''
         <label style="display:block;font-size:13px;color:#8a6f52;margin-bottom:4px">名称</label>
         <input id="skillName" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #ddd3c6;border-radius:9px;margin-bottom:14px;background:#fff">
         <label style="display:block;font-size:13px;color:#8a6f52;margin-bottom:4px">触发描述 / 一句话说明</label>
-        <input id="skillDesc" style="width:width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #ddd3c6;border-radius:9px;margin-bottom:14px;background:#fff">
+        <input id="skillDesc" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #ddd3c6;border-radius:9px;margin-bottom:14px;background:#fff">
         <label style="display:block;font-size:13px;color:#8a6f52;margin-bottom:4px">技能内容（Markdown）</label>
         <textarea id="skillContent" rows="14" style="width:100%;box-sizing:border-box;padding:12px;border:1px solid #ddd3c6;border-radius:9px;font-family:ui-monospace,monospace;font-size:13px;background:#fff"></textarea>
+        <div id="skillScripts" style="margin-top:12px;font-size:12px;color:#746d63"></div>
         <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
           <button id="skillCancel" style="padding:9px 18px;border:1px solid #ddd3c6;border-radius:9px;background:#fff;cursor:pointer">取消</button>
           <button id="skillSave" style="padding:9px 18px;border:0;border-radius:9px;background:#8a6f52;color:#fff;cursor:pointer">保存</button>
