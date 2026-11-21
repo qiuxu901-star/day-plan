@@ -48,6 +48,7 @@ const dom = new JSDOM(html, {
       else if (/^\/workboard\/api\/v1\/\w+\?/.test(url)) body = {items:[], total:0, page:1, size:200, has_more:false, next_page:null};
       else if (url.includes('/api/keys')) body = url.includes('method') ? {id:'k_test',key:'wb_fake',scope:'read'} : [{id:'k_test',scope:'read',note:'测试',revoked:0,created_at:'2026-11-21'}];
       else if (url.includes('/api/skills')) body = [{id:'s_test',name:'测试技能',description:'_desc',content:'_content',updated_at:'2026-11-21'}];
+      else if (url.includes('/api/agent/chat')) body = {ok:true,intent:'start',reply:'当前最重要的3件事',data:{top3:[{任务:'测试',优先级:'P1',分数:140}]},audit_ids:[],undoable:false};
       else body = {record_id:'new-1'};
       return Promise.resolve({ok:true, status:200, json:()=>Promise.resolve(body)});
     };
@@ -68,6 +69,11 @@ setTimeout(() => {
   checks.push(['APP Key 页面存在', !!d.getElementById('view-keys')]);
   checks.push(['AI生成Key页面已回退', !d.getElementById('view-aikey')]);
   checks.push(['技能管理页面存在', !!d.getElementById('view-skills')]);
+  checks.push(['Agent对话区存在', !!d.getElementById('agentDock')]);
+  checks.push(['鲸鱼SVG存在', !!d.querySelector('.wb-whale')]);
+  checks.push(['快捷指令4个', d.querySelectorAll('#agentQuick button').length===4]);
+  checks.push(['对话输入框存在', !!d.getElementById('agentInput')]);
+  checks.push(['仪表盘已包进dash-scroll', !!d.querySelector('.dash-scroll')]);
   checks.push(['新导航按钮存在', d.querySelectorAll('[data-view="keys"]').length>=2]);
 
   let pass = 0;
