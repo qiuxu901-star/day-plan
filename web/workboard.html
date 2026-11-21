@@ -4,7 +4,7 @@
 <meta charset="UTF-8" data-page-node-id="OtccAbv3Zr9w28nVdH50B5">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" data-page-node-id="GziCq5uJGThQmhxZT1EJa3">
 <meta name="theme-color" content="#f5f0e8" data-page-node-id="gXV7PBDJUGDbHv1CRwqbQk">
-<title>工作计划台</title>
+<title>潮汐 · 时间与精力的工作台</title>
 <!-- 本工作台通过 WorkBuddy 资料库能力（library skill）搭建、存储和部署 -->
 <style>
 :root{
@@ -725,14 +725,23 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
     .agent-bubble{max-width:100%;font-size:15px}
     .skill-preview{max-width:100%;width:100%}
   }
+  /* ===== 潮汐品牌修饰 ===== */
+  .brand-mark{background:linear-gradient(140deg,#2c8b86,#14515d)!important;box-shadow:0 7px 18px rgba(20,81,93,.24)!important}
+  .brand-mark svg{width:24px;height:24px;stroke:#eaf6f2;stroke-width:1.8;fill:none}
+  .brand strong{letter-spacing:.12em!important;color:#1c4a52}
+  .brand span{color:#6b8a88!important}
+  .sidebar{background:linear-gradient(180deg,#eef2ec 0%,#ede6dc 42%)!important}
+  .side-foot::before{content:"◌ ";color:var(--sage)}
+  .topbar::after{content:"";position:absolute;left:0;right:0;bottom:-6px;height:6px;
+    background:radial-gradient(ellipse at 30% 0,rgba(44,139,134,.10),transparent 60%);pointer-events:none}
 </style>
 </head>
 <body data-page-node-id="hwziI2PCj4FjvP8nQPS6mO">
 <!-- 侧边栏 -->
 <aside class="sidebar" data-page-node-id="CRcelFlSEG4D5YrRj0ZaLW">
   <div class="brand-inner" data-page-node-id="ZF5HYxLZi1vmH8gcDr3gFh">
-    <div class="brand-mark" data-page-node-id="UvNkmg7uauNQBVb7HYZinV">计</div>
-    <div class="brand" data-page-node-id="Wj6DbvUBvMtBdTE3zTVnDK"><strong data-page-node-id="ZzBp8XxHUwHjPEnPiULiVT">工作计划台</strong><span data-page-node-id="Ra2FGEK73HlUHq4nkd2cxV">DAY PLAN · REVIEW · PROGRESS</span></div>
+    <div class="brand-mark" data-page-node-id="UvNkmg7uauNQBVb7HYZinV" data-tide-brand="1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 14c3-2.6 5-2.6 8 0s5 2.6 8 0 4-2.6 4-2.6"/><path d="M2 18c3-2.6 5-2.6 8 0s5 2.6 8 0 4-2.6 4-2.6"/><circle cx="17" cy="6" r="2.5"/></svg></div>
+    <div class="brand" data-page-node-id="Wj6DbvUBvMtBdTE3zTVnDK"><strong data-page-node-id="ZzBp8XxHUwHjPEnPiULiVT">潮汐</strong><span data-page-node-id="Ra2FGEK73HlUHq4nkd2cxV">TIDE · 随潮汐，管理你的时间与精力</span></div>
   </div>
   <nav class="side-nav" id="sideNav" data-page-node-id="xqOc1KxCga3RmK8gb0IbAQ">
     <button class="nav-item active" data-view="agent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12c3-4 9-4 12 0 3 4-3 7-6 7s-9-3-6-7z"/><circle cx="9" cy="12" r="1"/></svg>Agent</button>
@@ -746,7 +755,7 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
     <button class="nav-item" data-view="keys"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8m-3 3l2 2m-5 1l2 2"/></svg>APP Key</button>
     <button class="nav-item" data-view="skills"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>技能管理</button>
   </nav>
-  <div class="side-foot" data-page-node-id="funvU2R2r3HnVS9eeOzSRm">数据在线存储 · 多端同步</div>
+  <div class="side-foot" data-page-node-id="funvU2R2r3HnVS9eeOzSRm">潮起潮落，事事有节 · 多端同步</div>
 </aside>
 
 <!-- 主内容 -->
@@ -829,8 +838,8 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
         <path class="wb-wave wb-wave-b" d="M0 172 Q45 158 90 172 T180 172 T270 172 T360 172 V200 H0 Z" fill="#0b2330" opacity=".45"/>
       </svg>
       <div class="agent-intro">
-        <div class="agent-kicker">TIDE · 你的工作搭子</div>
-        <div class="agent-sub">说一句「开工」看重点，或直接告诉我今天的计划。</div>
+        <div class="agent-kicker">TIDE · 随潮汐而行</div>
+        <div class="agent-sub">潮水会带走杂念，留下要紧的事。说「开工」看重点，或直接告诉我今天的计划。</div>
       </div>
     </div>
     <div class="agent-thread" id="agentThread" role="log" aria-live="polite"></div>
@@ -1221,7 +1230,7 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   var MILE_STATUSES = ['未开始', '进行中', '已完成'];
   var IB_TYPES = ['收集', '问题', '思考'];
   var IB_STATUSES = ['待处理', '已转任务', '已归档'];
-  var VIEW_TITLES = {agent:'TIDE · 和鲸鱼聊聊', dashboard:'今天，慢慢来', task:'日计划 · Day Plan', week:'全局 · 全部任务', calendar:'日历看板 · Month View', inbox:'收集箱 · Inbox', review:'每日复盘', milestone:'阶段进展', time:'时间记录', history:'历史追溯', keys:'APP Key 管理', skills:'技能管理'};
+  var VIEW_TITLES = {agent:'潮起时，和鲸鱼聊聊', dashboard:'今天，慢慢来', task:'日计划 · 一段潮汐', week:'全局 · 潮线全景', calendar:'日历 · 月的盈亏', inbox:'收集箱 · 拾贝', review:'每日复盘 · 落潮时分', milestone:'阶段进展 · 礁石', time:'时间记录 · 潮痕', history:'历史追溯 · 旧潮', keys:'APP Key 管理', skills:'技能管理 · 岛屿'};
 
   /* ========== 自托管数据层（替换平台 SDK，业务函数签名不变） ========== */
   var API_BASE = '/workboard/api';
@@ -1324,8 +1333,8 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
     d.id = 'wbLogin';
     d.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(20,18,16,.72);display:flex;align-items:center;justify-content:center';
     d.innerHTML = '<div style="background:#faf7f2;border-radius:16px;padding:32px;width:min(360px,90vw);box-shadow:0 20px 60px rgba(0,0,0,.3);color:#29241f">' +
-      '<div style="font-size:20px;font-weight:700;margin-bottom:6px">工作计划台</div>' +
-      '<div style="font-size:13px;color:#8a8076;margin-bottom:20px">登录后查看你的任务与时间</div>' +
+      '<div style="font-size:20px;font-weight:700;margin-bottom:6px">潮汐</div>' +
+      '<div style="font-size:13px;color:#8a8076;margin-bottom:20px">潮起潮落，事事有节</div>' +
       '<input id="wbPwd" type="password" placeholder="访问密码" style="width:100%;box-sizing:border-box;padding:12px 14px;border:1px solid #ddd3c6;border-radius:10px;font-size:15px;background:#fff">' +
       '<div id="wbLoginErr" style="color:#c0392b;font-size:12px;min-height:18px;margin-top:8px"></div>' +
       '<button id="wbLoginBtn" style="width:100%;padding:12px;border:0;border-radius:10px;background:#8a6f52;color:#fff;font-size:15px;font-weight:600;margin-top:6px;cursor:pointer">进入</button></div>';

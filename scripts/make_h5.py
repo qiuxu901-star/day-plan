@@ -130,8 +130,8 @@ new_block = r'''  /* ========== 自托管数据层（替换平台 SDK，业务�
     d.id = 'wbLogin';
     d.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(20,18,16,.72);display:flex;align-items:center;justify-content:center';
     d.innerHTML = '<div style="background:#faf7f2;border-radius:16px;padding:32px;width:min(360px,90vw);box-shadow:0 20px 60px rgba(0,0,0,.3);color:#29241f">' +
-      '<div style="font-size:20px;font-weight:700;margin-bottom:6px">工作计划台</div>' +
-      '<div style="font-size:13px;color:#8a8076;margin-bottom:20px">登录后查看你的任务与时间</div>' +
+      '<div style="font-size:20px;font-weight:700;margin-bottom:6px">潮汐</div>' +
+      '<div style="font-size:13px;color:#8a8076;margin-bottom:20px">潮起潮落，事事有节</div>' +
       '<input id="wbPwd" type="password" placeholder="访问密码" style="width:100%;box-sizing:border-box;padding:12px 14px;border:1px solid #ddd3c6;border-radius:10px;font-size:15px;background:#fff">' +
       '<div id="wbLoginErr" style="color:#c0392b;font-size:12px;min-height:18px;margin-top:8px"></div>' +
       '<button id="wbLoginBtn" style="width:100%;padding:12px;border:0;border-radius:10px;background:#8a6f52;color:#fff;font-size:15px;font-weight:600;margin-top:6px;cursor:pointer">进入</button></div>';

@@ -575,7 +575,7 @@ async function handle(req,res){
     if(!auth(req)) return json(res,401,{detail:'未登录'});
     if(!AI_BASE||!AI_KEY) return json(res,503,{detail:'AI 未配置'});
     const b=await readBody(req), qText=String(b.question||'');
-    const sys='你是工作计划台助手。只使用提供的记录回答，字段为空就说空，绝不编造任务、日期或数值。';
+    const sys='你是「潮汐」工作台助手。只使用提供的记录回答，字段为空就说空，绝不编造任务、日期或数值。';
     const messages=[{role:'system',content:sys+'\n\n'+buildContext(qText)},{role:'user',content:qText}];
     const resp=await callAI(messages,false);
     const data=await resp.json();
