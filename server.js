@@ -248,12 +248,20 @@ const FIELD_WHITELIST = {
   review: ['日期','今日完成','卡点困难','明日计划','一句话总结','周次'],
   week: ['周次','本周目标','关键结果','下周计划','周总结','体验打分']
 };
+// LLM 常见英文/别名键 → 中文字段名（兜底，防止 prompt 约束失效时丢数据）
+const FIELD_ALIAS={title:'任务名称',name:'任务名称',task:'任务名称',事项名:'任务名称',
+  date:'计划日',due:'到期日',deadline:'到期日',time:'开始时间',start:'开始时间',
+  end:'结束时间',person:'负责人',owner:'负责人',who:'负责人',desc:'备注',
+  description:'备注',note:'备注',remarks:'备注',priority:'优先级',status:'状态',
+  duration:'时长',content:'内容',category:'分类',tag:'标签',
+  '任务':'任务名称'};
 const STATUS_ENUM = ['待办','进行中','已完成'];
 const PRIORITY_ENUM = ['P0','P1','P2'];
 const INTENT_SYS = `你是"潮汐"工作台的意图分类器。只输出一个严格 JSON 对象，禁止解释文字、禁止 markdown 代码块。
 输出格式：{"intent":"record|start|wrap|qa|create_skill|chitchat","confidence":0到1,"slots":{},"reason":"一句话"}
 意图定义：
-- record：用户口述要新增/修改任务、时间记录、复盘、收集箱。slots={"target":"task|time|inbox|review","items":[{"字段名":"值"}]}。日期用 YYYY-MM-DD；"今天/明天"不要自行推算，交给代码。
+- record：用户口述要新增/修改任务、时间记录、复盘、收集箱。slots={"target":"task|time|inbox|review","items":[{"中文字段名":"值"}]}。
+  【硬性要求】① 每条记录只用一个 item 对象，把这句话的所有信息都放进这一个对象，禁止拆成多个 item（例如 title/date/time/person 必须合到同一个 item）。② 字段名必须用中文白名单，task 用：任务名称/状态/优先级/到期日/计划日/备注/事项类型/负责人/事项二；time 用：事项/日期/时长/分类/开始时间/结束时间；inbox 用：内容/类型/标签/来源/记录日期。绝不用 title/date/time/person 等英文键。③ "今天/明天"原样填入对应日期字段，交给代码换算。④ 一句话通常只产生一条 item。
 - start：开工、今日计划、今天重点、TOP3、今天该做什么。slots={"date":"YYYY-MM-DD"}
 - wrap：收工、复盘、今天完成了什么、计划和实际差多少。slots={"date":"YYYY-MM-DD"}
 - qa：基于已有记录提问。slots={"question":"原话"}
@@ -303,12 +311,21 @@ function computeReview(){
 function agentRecord(slots){
   const target=(slots&&slots.target)||'task';
   if(!FIELD_WHITELIST[target]) return {created:[],errors:['不支持写入该类型']};
-  const items=(slots&&slots.items)||[];
+  let items=(slots&&slots.items)||[];
   if(!items.length) return {created:[],errors:['没有可写入的条目']};
+  // LLM 有时把一句话拆成多个只含单字段的 item（title/date/time/person），先合并成一条
+  const NAME_KEY={task:'任务名称',time:'事项',inbox:'内容',review:'日期'}[target]||'任务名称';
+  const hasName=items.some(x=>x && Object.keys(x).some(k=>FIELD_ALIAS[k]===NAME_KEY || k===NAME_KEY));
+  if(!hasName && items.length>1){
+    const merged={};
+    items.forEach(x=>{ if(x && typeof x==='object') Object.assign(merged, x); });
+    items=[merged];
+  }
   const created=[], errors=[];
   items.forEach((item,i)=>{
     const clean={};
-    Object.entries(item).forEach(([k,v])=>{
+    Object.entries(item).forEach(([k0,v])=>{
+      const k=FIELD_ALIAS[k0]||k0;   // 英文键/别名 → 中文字段名
       if(!FIELD_WHITELIST[target].includes(k) || v===null || v===undefined) return;
       let val=String(v).trim();
       if(k==='状态' && !STATUS_ENUM.includes(val)) val='待办';
@@ -689,7 +706,7 @@ async function handle(req,res){
       const r=agentRecord(intent.slots);
       data.created=r.created;
       audit_ids=r.created.map(x=>x._audit_id).filter(Boolean);
-      const lines=r.created.map((x,i)=>(i+1)+'. '+Object.values(x).filter(v=>v&&typeof v==='string'&&!v.startsWith('t_')).slice(0,3).join(' / '));
+      const lines=r.created.map((x,i)=>(i+1)+'. '+Object.entries(x).filter(([k,v])=>v&&typeof v==='string'&&['任务名称','事项','内容','状态','优先级','计划日','开始时间'].includes(k)).map(([,v])=>v).slice(0,3).join(' / '));
       reply='已记下 '+r.created.length+' 条：\n'+(lines.join('\n')||'（无）')+
             (r.errors.length?'\n未写入：'+r.errors.join('；'):'')+'\n数据已保存，稍后同步到其他端。';
     } else if(intent.intent==='start'){
