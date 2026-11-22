@@ -456,6 +456,67 @@ function getPrompts(){
   }catch(e){}
   return out;
 }
+// ===== 技能与提示词按意图装配（v1.0 套件运行链路）=====
+const INTENT_SKILL={start:'day-kickoff', wrap:'day-review', record:'activity-capture',
+  qa:'activity-capture', create_skill:'_generator', chitchat:''};
+function loadSkill(name){
+  if(!name) return '';
+  try{ const r=db.prepare('SELECT content FROM skills WHERE name=? AND status=?').get(name,'active');
+    return r ? r.content : ''; }catch(e){ return ''; }
+}
+function loadSkillRefs(name, limit){
+  if(!name) return '';
+  try{
+    const rows=db.prepare('SELECT ref_key,content FROM skill_refs WHERE skill_name=? ORDER BY ref_key').all(name);
+    // 参考规则只取关键红线摘要（套件建议按需读取，不整篇塞进上下文）
+    const DIGEST={
+      taxonomy:'四维度独立：domain/cognitive_type/value_type/task_status；认知类型是行为性质非价值；灵感用 IdeaEvent 不重复计时长；重叠区间取并集不累加；completed_confirmed 须有明示证据。',
+      runtime:'解析意图→检查记录与权限→核对→分析→授权写入→验证→简短确认；工具不可用只输出待保存内容，不声称已保存。'
+    };
+    const core=rows.filter(r=>/taxonomy|runtime/.test(r.ref_key));
+    return (core.length?core:rows).slice(0,limit||2)
+      .map(r=>'【参考:'+r.ref_key+'】'+(DIGEST[r.ref_key]||String(r.content).slice(0,600))).join('\n');
+  }catch(e){ return ''; }
+}
+function buildAgentSystem(intent, slots){
+  const pr=getPrompts();
+  const parts=[];
+  // 主系统词（套件必装）
+  if(pr.system) parts.push(pr.system);
+  // 按意图追加补充提示词
+  if((intent==='start'||intent==='wrap'||intent==='record') && pr.coach) parts.push('【执行教练模式】\n'+pr.coach);
+  if((intent==='qa'||intent==='wrap'||intent==='start') && pr.strategic) parts.push('【战略军师模式】\n'+pr.strategic);
+  if(intent==='create_skill' && pr.generator) parts.push('【技能生成专家】\n'+pr.generator);
+  // 按意图加载技能正文（真正让技能参与运行）
+  let skillName=INTENT_SKILL[intent]||'';
+  if(intent==='record' && slots && slots.target==='task') skillName='task-planning';
+  const skill=loadSkill(skillName);
+  if(skill) parts.push('【本次调用的技能：'+skillName+'】\n'+skill);
+  const refs=loadSkillRefs(skillName);
+  if(refs) parts.push(refs);
+  parts.push('【输出纪律】只使用下面提供的事实数据，不得编造任何任务、时间、数值或结论；按上面技能的输出模板简洁表述。');
+  return parts.join('\n\n---\n\n');
+}
+// 让 LLM 按技能模板重述确定性数据；失败返回 null 由调用方兜底
+async function renderWithSkill(intent, slots, facts, fallback){
+  try{
+    const cfg=getAIConfig();
+    if(!cfg.base_url||!cfg.api_key) return null;
+    const sys=buildAgentSystem(intent, slots);
+    const r=await fetch(cfg.base_url.replace(/\/+$/,'')+'/chat/completions',{
+      method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.api_key},
+      body:JSON.stringify({model:cfg.model,messages:[
+        {role:'system',content:sys},
+        {role:'user',content:'以下是已从数据库核验的事实数据（JSON），请严格据此按技能模板输出；不得新增任何事实：\n'+JSON.stringify(facts,null,1)+'\n\n用户原话：'+String(slots&&slots.__raw||'')}
+      ]}),
+      signal:AbortSignal.timeout(20000)
+    });
+    const d=await r.json();
+    const text=(d.choices?.[0]?.message?.content||'').trim();
+    return text || null;
+  }catch(e){ return null; }
+}
+
 // 时间/时长规范化：把中文口语转成机器可读格式
 function normClock(v){
   let s=String(v==null?'':v).trim();
@@ -808,22 +869,29 @@ async function handle(req,res){
       data.created=r.created;
       audit_ids=r.created.map(x=>x._audit_id).filter(Boolean);
       const lines=r.created.map((x,i)=>(i+1)+'. '+Object.entries(x).filter(([k,v])=>v&&typeof v==='string'&&['任务名称','事项','内容','状态','优先级','计划日','开始时间'].includes(k)).map(([,v])=>v).slice(0,3).join(' / '));
-      reply='已记下 '+r.created.length+' 条：\n'+(lines.join('\n')||'（无）')+
+      const fallback='已记下 '+r.created.length+' 条：\n'+(lines.join('\n')||'（无）')+
             (r.errors.length?'\n未写入：'+r.errors.join('；'):'')+'\n数据已保存，稍后同步到其他端。';
+      const rendered=await renderWithSkill('record',Object.assign({__raw:message},intent.slots||{}),
+        {写入结果:r.created,未写入:r.errors}, fallback);
+      reply=rendered||fallback;
     } else if(intent.intent==='start'){
       const t=computeTop3();
       data.top3=t.关键3件; data.summary={未完成:t.未完成总数,逾期:t.逾期数};
       const lines=t.关键3件.map((x,i)=>(i+1)+'. ['+x.优先级+'] '+x.任务+'（'+(x.状态||'待办')+'，'+x.分数+'分）');
-      reply='当前最重要的 3 件事：\n'+(lines.join('\n')||'暂无逾期或今日到期事项')+
+      const fallback='当前最重要的 3 件事：\n'+(lines.join('\n')||'暂无逾期或今日到期事项')+
             '\n未完成 '+t.未完成总数+' 项，其中逾期 '+t.逾期数+' 项。';
+      const rendered=await renderWithSkill('start',{__raw:message},
+        {日期:dateToday(),关键3件:t.关键3件,未完成:t.未完成总数,逾期:t.逾期数}, fallback);
+      reply=rendered||fallback;
     } else if(intent.intent==='wrap'){
       const rv=computeReview();
       data.summary=rv;
-      reply=rv.一句话+'\n完成：'+(rv.今日完成.join('、')||'无')+'。';
+      const fallback=rv.一句话+'\n完成：'+(rv.今日完成.join('、')||'无')+'。';
+      const rendered=await renderWithSkill('wrap',{__raw:message},rv,fallback);
+      reply=rendered||fallback;
     } else if(intent.intent==='qa'){
       if(!getAIConfig().base_url||!getAIConfig().api_key) return json(res,503,{detail:'AI 未配置'});
-      const pr=getPrompts();
-      const sys=(pr.system?pr.system+'\n\n---\n\n':'')+pr.qa;
+      const sys=buildAgentSystem('qa',{__raw:message})+'\n\n'+getPrompts().qa;
       const resp=await callAI([{role:'system',content:sys+'\n\n'+buildContext(message)},{role:'user',content:message}],false);
       const d=await resp.json();
       reply=d.choices?.[0]?.message?.content||'（无返回）';
