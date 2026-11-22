@@ -296,6 +296,22 @@ function formatToolResult(tool, r){
   }catch(e){ return JSON.stringify(r).slice(0,1500); }
 }
 
+// 确定性关键词路由：常见系统管理请求直接映射工具，不依赖 LLM 选择
+function toolByKeyword(text){
+  const t=String(text||'');
+  if(/APP.?Key|api.?key|密钥|key列表|有哪些key|生成.{0,4}key|吊销/i.test(t))
+    return /生成|新建|创建/.test(t)?{tool:'create_key',args:{scope:/写|write/i.test(t)?'write':'read'}}
+      :/吊销|删除|撤销/.test(t)?null:{tool:'list_keys',args:{}};
+  if(/同步队列|待同步|pending|积压/i.test(t)) return {tool:'sync_status',args:{}};
+  if(/什么模型|哪个模型|模型名|模型配置|用的什么|deepseek|上下文预算/i.test(t))
+    return /改|换|设置|配置成/.test(t)?null:{tool:'get_ai_config',args:{}};
+  if(/列出.*技能|所有技能|技能列表|有哪些技能/i.test(t)) return {tool:'list_skills',args:{}};
+  if(/提示词|prompt/i.test(t) && /查看|列出|有哪些/.test(t)) return {tool:'list_prompts',args:{}};
+  if(/开工|今日重点|今天该做|TOP3/i.test(t)) return {tool:'start_day',args:{}};
+  if(/收工|复盘今天/i.test(t)) return {tool:'review_day',args:{}};
+  return null;
+}
+
 async function executeTool(name, args){
   const a=args||{};
   switch(name){
@@ -1241,17 +1257,19 @@ async function handle(req,res){
       // 保险：系统管理对象不在业务表里，qa 查不到 → 强制走工具
       intent=Object.assign({},intent,{intent:'tool',slots:{tool_call:{tool:'',args:{}}},reason:'qa转tool'});
       let tc=intent.slots.tool_call;
+      if(!tc || !tc.tool) tc=toolByKeyword(message);
       const cfg=getAIConfig();
       const sys='从工具清单选一个最合适的工具完成请求，只输出严格JSON：{"tool":"工具名","args":{参数}}，不要解释。\n'+
         AGENT_TOOLS.map(t=>'- '+t.name+': '+t.desc+' | '+JSON.stringify(t.params)).join('\n')+'\n请求：'+message;
-      try{
+      if(!tc){ try{
         const r=await fetch(cfg.base_url.replace(/\/+$/,'')+'/chat/completions',{
           method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.api_key},
           body:JSON.stringify({model:cfg.model,response_format:{type:'json_object'},messages:[{role:'system',content:sys},{role:'user',content:message}]}),
           signal:AbortSignal.timeout(25000)});
         const d=await r.json();
-        tc=JSON.parse((d.choices?.[0]?.message?.content||'').replace(/```json|```/g,'').trim());
-      }catch(e){}
+        let raw=(d.choices?.[0]?.message?.content||'').replace(/```json|```/g,'').trim();
+        const m=raw.match(/\{[\s\S]*\}/); tc=JSON.parse(m?m[0]:raw);
+      }catch(e){} }
       if(tc && TOOL_NAMES.includes(tc.tool)){
         try{
           const result=await executeTool(tc.tool,tc.args||{});
@@ -1277,6 +1295,7 @@ async function handle(req,res){
     } else if(intent.intent==='tool'){
       // 全权限工具调用：LLM 选工具+参数，代码严格校验执行
       let tc=intent.slots&&intent.slots.tool_call;
+      if(!tc || !tc.tool) tc=toolByKeyword(message);
       if(!tc){
         const cfg=getAIConfig();
         const sys='你是潮汐工作台的 Agent。从工具清单里选一个最合适的工具完成用户请求，只输出严格 JSON：{"tool":"工具名","args":{参数}}，不要解释文字。\n可用工具（名称:说明 参数）:\n'+
