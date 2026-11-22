@@ -125,7 +125,12 @@ function listRecords(table, opt){
     .all(...params, opt.size, offset);
   const fields = c.filter(x=>!META_COLS.has(x));
   const items = rows.map(r=>{
-    const o={}; fields.forEach(f=>o[f]=r[f]); o.record_id=r['record_id']; return o;
+    const o={}; fields.forEach(f=>o[f]=r[f]);
+    o.record_id=r['record_id'];
+    // 前端 UI 写操作（更新/删除/改状态）统一用 _id；平台时代是 _id，自托管后只有 record_id。
+    // 这里同时输出 _id，兼容前端，避免 PATCH /api/v1/task/undefined。
+    o._id=r['record_id'];
+    return o;
   });
   return {items,total,page:opt.page,size:opt.size,
     has_more: offset+rows.length<total,
@@ -872,7 +877,8 @@ async function handle(req,res){
     }
     if(method==='GET' && rid){
       const row=db.prepare(`SELECT * FROM ${q(t)} WHERE record_id=?`).get(rid);
-      return row?json(res,200,row):json(res,404,{detail:'记录不存在'});
+      if(!row) return json(res,404,{detail:'记录不存在'});
+      return json(res,200,Object.assign({},row,{_id:row['record_id']}));
     }
     if(method==='POST' && !rid) return json(res,200,addRecord(t,await readBody(req),'web'));
     if(method==='PATCH' && rid){
