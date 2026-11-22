@@ -797,6 +797,7 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
     <button class="nav-item" data-view="review" data-page-node-id="BK8gmLR4dRbKKl4UjJBZIc"><svg data-page-node-id="1XCk8fYEJR2VoJdrEto6zY"><path d="M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V4z" data-page-node-id="KPp6d9KyUT0xbCYF4NYrvy"/><path d="M5 4a2 2 0 0 1 2-2h10v18" data-page-node-id="TVlS49q722O0hIX4OEBGap"/></svg>复盘</button>
     <button class="nav-item" data-view="keys"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8m-3 3l2 2m-5 1l2 2"/></svg>APP Key</button>
     <button class="nav-item" data-view="skills"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>技能管理</button>
+    <button class="nav-item" data-view="aiconfig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 1 7 7c0 3-2 4-2 6H7c0-2-2-3-2-6a7 7 0 0 1 7-7z"/><path d="M9 19h6m-5 3h4"/></svg>模型配置</button>
   </nav>
   <div class="side-foot" data-page-node-id="funvU2R2r3HnVS9eeOzSRm">潮起潮落，事事有节 · 多端同步</div>
 </aside>
@@ -1243,6 +1244,40 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
       </div>
     </div>
   </section>
+
+  <!-- ===== AI 模型配置 ===== -->
+  <section class="view" id="view-aiconfig" style="padding:24px;max-width:900px">
+    <div class="panel" style="padding:20px">
+      <div class="panel-head"><h2 style="margin:0 0 6px">模型配置</h2><span class="hint" style="color:var(--muted);font-size:13px">接入你自己的大模型 · OpenAI 兼容接口 · 保存即生效，无需重启</span></div>
+      <div id="aiCfgSource" style="font-size:12px;color:var(--muted);margin:12px 0 18px;padding:9px 12px;border-radius:9px;background:var(--paper)">读取配置中…</div>
+
+      <div style="display:grid;grid-template-columns:1fr;gap:14px">
+        <div><label style="display:block;font-size:13px;color:var(--muted);margin-bottom:6px">接口地址（OpenAI 兼容 base_url，不带 /chat/completions）</label>
+          <input id="aiBaseUrl" placeholder="https://api.deepseek.com" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:var(--card);color:var(--ink);font-size:14px"></div>
+        <div><label style="display:block;font-size:13px;color:var(--muted);margin-bottom:6px">模型名称</label>
+          <input id="aiModel" placeholder="deepseek-chat" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:var(--card);color:var(--ink);font-size:14px"></div>
+        <div><label style="display:block;font-size:13px;color:var(--muted);margin-bottom:6px">API Key（脱敏显示；要更换就整段粘贴新的，留空或原样不改则不覆盖）</label>
+          <input id="aiKey" type="text" autocomplete="off" placeholder="sk-…" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:var(--card);color:var(--ink);font-size:14px"></div>
+        <div><label style="display:block;font-size:13px;color:var(--muted);margin-bottom:6px">上下文预算（字符，受模型窗口上限约束）</label>
+          <input id="aiCtxMax" type="number" min="1000" max="2000000" placeholder="300000" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:var(--card);color:var(--ink);font-size:14px"></div>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 10px">
+        <button id="aiCfgTest" style="padding:10px 20px;border:1px solid var(--sage);border-radius:10px;background:var(--card);color:var(--sage);cursor:pointer;font-size:14px">测试连接</button>
+        <button id="aiCfgSave" style="padding:10px 20px;border:0;border-radius:10px;background:var(--sage);color:#fff;cursor:pointer;font-size:14px">保存配置</button>
+      </div>
+      <div id="aiCfgMsg" style="font-size:13px;line-height:1.6;color:var(--muted);min-height:22px"></div>
+
+      <div style="margin-top:20px;padding:14px;border-radius:11px;background:var(--paper);font-size:12px;color:var(--muted);line-height:1.8">
+        <b style="color:var(--ink)">说明</b><br>
+        · 支持任何 OpenAI 兼容接口：DeepSeek、通义、Moonshot、OpenAI、自建 Ollama/vLLM 等。<br>
+        · 密钥只保存在你的服务器上，页面只显示脱敏形式，不回传完整密钥。<br>
+        · 修改后立即生效，Agent 对话、问答、意图识别都会用新模型，无需重启。<br>
+        · 「测试连接」只发一句短问验证连通，不会保存任何改动。
+      </div>
+    </div>
+  </section>
+
 </main>
 
 <!-- 移动端底部导航 -->
@@ -1257,6 +1292,7 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   <button data-view="review" data-page-node-id="UayQXGw1kIHIENbgTFSONw"><svg data-page-node-id="iJWMXgpHe0DcFxyWukEO3R"><path d="M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V4z" data-page-node-id="HjloDZZiZqpsN2JIUpsr1W"/><path d="M5 4a2 2 0 0 1 2-2h10v18" data-page-node-id="1NejG62knodDECI8MfGIac"/></svg>复盘</button>
   <button data-view="keys"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8m-3 3l2 2"/></svg>Key</button>
   <button data-view="skills"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>技能</button>
+  <button data-view="aiconfig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 1 7 7c0 3-2 4-2 6H7c0-2-2-3-2-6a7 7 0 0 1 7-7z"/><path d="M9 19h6m-5 3h4"/></svg>模型</button>
 </nav>
 
 <div class="modal-mask" id="modalMask" data-page-node-id="modalMask01"><div class="modal" id="modalBox" data-page-node-id="modalBox001"></div></div>
@@ -1281,7 +1317,7 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   var MILE_STATUSES = ['未开始', '进行中', '已完成'];
   var IB_TYPES = ['收集', '问题', '思考'];
   var IB_STATUSES = ['待处理', '已转任务', '已归档'];
-  var VIEW_TITLES = {agent:'潮起时，和鲸鱼聊聊', dashboard:'今天，慢慢来', task:'日计划 · 一段潮汐', week:'全局 · 潮线全景', calendar:'日历 · 月的盈亏', inbox:'收集箱 · 拾贝', review:'每日复盘 · 落潮时分', milestone:'阶段进展 · 礁石', time:'时间记录 · 潮痕', history:'历史追溯 · 旧潮', keys:'APP Key 管理', skills:'技能管理 · 岛屿'};
+  var VIEW_TITLES = {agent:'潮起时，和鲸鱼聊聊', dashboard:'今天，慢慢来', task:'日计划 · 一段潮汐', week:'全局 · 潮线全景', calendar:'日历 · 月的盈亏', inbox:'收集箱 · 拾贝', review:'每日复盘 · 落潮时分', milestone:'阶段进展 · 礁石', time:'时间记录 · 潮痕', history:'历史追溯 · 旧潮', keys:'APP Key 管理', skills:'技能管理 · 岛屿', aiconfig:'模型配置 · 接上你的 AI'};
 
   /* ========== SDK 探测 ========== */
   var db = null;
@@ -3380,9 +3416,31 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
     $('skillEditor').style.display='flex';
   }
 
+
+  function loadAIConfig(){
+    if(!$('aiBaseUrl')) return;
+    wbApi('/ai/config').then(function(c){
+      $('aiBaseUrl').value=c.base_url||'';
+      $('aiModel').value=c.model||'';
+      $('aiCtxMax').value=c.context_max||300000;
+      $('aiKey').value=c.api_key_masked||'';
+      $('aiKey').setAttribute('data-masked', c.api_key_set?'1':'0');
+      var src=c.source==='database'?'当前配置保存在服务器（网页可改）':'当前使用服务器环境变量初始值（保存后转为网页管理）';
+      $('aiCfgSource').textContent=src+(c.updated_at?(' · 更新于 '+String(c.updated_at).slice(0,16).replace('T',' ')):'');
+    }).catch(function(e){ $('aiCfgSource').textContent='读取失败：'+e.message; });
+  }
+  function aiCfgPayload(){
+    return {base_url:$('aiBaseUrl').value.trim(), model:$('aiModel').value.trim(),
+      api_key:$('aiKey').value.trim(), context_max:parseInt($('aiCtxMax').value,10)||300000};
+  }
+  function aiCfgMsg(text, bad){
+    var m=$('aiCfgMsg'); if(!m) return;
+    m.textContent=text; m.style.color=bad?'var(--terra)':'var(--sage)';
+  }
   function wbOnViewChange(view){
     if(view==='keys') loadKeys();
     if(view==='skills') loadSkills();
+    if(view==='aiconfig') loadAIConfig();
   }
 
   function initFeaturePages(){
@@ -3415,6 +3473,27 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
         .catch(function(e){ toast(e.message,true); });
     };
     // 切到对应视图时加载（由 switchView 内调用 wbOnViewChange）
+
+    var aiSave=$('aiCfgSave');
+    if(aiSave) aiSave.onclick=function(){
+      aiCfgMsg('保存中…',false);
+      wbApi('/ai/config',{method:'POST',body:JSON.stringify(aiCfgPayload())})
+        .then(function(r){
+          aiCfgMsg('✓ 已保存'+(r.key_changed?'（密钥已更新）':'（密钥保持不变）')+'，新配置立即生效。',false);
+          loadAIConfig();
+        }).catch(function(e){ aiCfgMsg('保存失败：'+e.message,true); });
+    };
+    var aiTest=$('aiCfgTest');
+    if(aiTest) aiTest.onclick=function(){
+      aiCfgMsg('正在连接模型…',false); aiTest.disabled=true;
+      wbApi('/ai/config/test',{method:'POST',body:JSON.stringify(aiCfgPayload())})
+        .then(function(r){
+          aiTest.disabled=false;
+          if(r.ok) aiCfgMsg('✓ 连接成功（'+r.ms+'ms，'+r.model+'）。模型回复：'+r.reply,false);
+          else aiCfgMsg('✗ 连接失败：'+(r.error||('HTTP '+r.status))+'（'+r.ms+'ms）',true);
+        }).catch(function(e){ aiTest.disabled=false; aiCfgMsg('测试失败：'+e.message,true); });
+    };
+
   }
 
 

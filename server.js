@@ -188,7 +188,23 @@ function metaTables(){
 }
 
 // ---------- AI 代理（可选） ----------
-const AI_BASE=process.env.AI_BASE_URL||'', AI_KEY=process.env.AI_API_KEY||'', AI_MODEL=process.env.AI_MODEL||'';
+function getAIConfig(){
+  let r=null;
+  try{ r=db.prepare('SELECT base_url,api_key,model,context_max,updated_at FROM ai_config WHERE id=1').get(); }catch(e){}
+  return {
+    base_url: r ? (r.base_url||'') : (process.env.AI_BASE_URL||''),
+    api_key:  r ? (r.api_key||'')  : (process.env.AI_API_KEY||''),
+    model:    r ? (r.model||'')    : (process.env.AI_MODEL||''),
+    context_max: r ? (parseInt(r.context_max,10)||300000) : (parseInt(process.env.AI_CONTEXT_MAX||'300000',10)),
+    source: r ? 'database' : 'env',
+    updated_at: r ? r.updated_at : ''
+  };
+}
+function maskKey(k){
+  if(!k) return '';
+  if(k.length<=10) return k.slice(0,2)+'…'+k.slice(-2);
+  return k.slice(0,6)+'…'+k.slice(-4);
+}
 function buildContext(question){
   // 全表轻量上下文：默认排除留痕表（227 行），按日期/关键词粗过滤
   const parts=[];
@@ -203,10 +219,12 @@ function buildContext(question){
   return parts.join('\n\n').slice(0, 30000);
 }
 async function callAI(messages, stream){
-  const resp = await fetch(AI_BASE+'/chat/completions',{
+  const cfg=getAIConfig();
+  const resp = await fetch(cfg.base_url.replace(/\/+$/,'')+'/chat/completions',{
     method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':'Bearer '+AI_KEY},
-    body:JSON.stringify({model:AI_MODEL,messages,stream:!!stream})
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.api_key},
+    body:JSON.stringify({model:cfg.model,messages,stream:!!stream}),
+    signal: AbortSignal.timeout(120000)
   });
   return resp;
 }
@@ -222,7 +240,7 @@ function createApiKey(scope, note){
 }
 
 // ---------- Agent 能力（意图识别由 LLM，确定性逻辑在代码） ----------
-const AI_CONTEXT_MAX = parseInt(process.env.AI_CONTEXT_MAX || '300000', 10);
+function aiContextMax(){ return getAIConfig().context_max; }
 const FIELD_WHITELIST = {
   task: ['任务名称','状态','优先级','到期日','备注','计划日','来源','时段','事项类型','周次','主线执行','负责人','事项二'],
   time: ['日期','事项','时长','分类','开始时间','结束时间','使用类型'],
@@ -362,20 +380,22 @@ function classifyByKeyword(text){
 }
 
 async function classifyIntent(message, history){
-  if(!AI_BASE||!AI_KEY) return classifyByKeyword(message);
-  // 上下文预算：历史 + 当前问题，超 AI_CONTEXT_MAX 时保留最近轮
+  const cfg=getAIConfig();
+  if(!cfg.base_url||!cfg.api_key) return classifyByKeyword(message);
+  // 上下文预算：历史 + 当前问题，超 context_max 时保留最近轮
   let hist=(history||[]).slice(-20);
   let ctx=hist.map(x=>(x.role==='me'?'用户':'助手')+': '+String(x.text||'').slice(0,500)).join('\n');
-  if(ctx.length>AI_CONTEXT_MAX) ctx=ctx.slice(-AI_CONTEXT_MAX);
+  const ctxMax=cfg.context_max;
+  if(ctx.length>ctxMax) ctx=ctx.slice(-ctxMax);
   const messages=[
     {role:'system',content:INTENT_SYS},
     {role:'user',content:(ctx?('近期对话：\n'+ctx+'\n\n'):'')+'当前输入：'+message}
   ];
   try{
-    const r=await fetch(AI_BASE+'/chat/completions',{
+    const r=await fetch(cfg.base_url.replace(/\/+$/,'')+'/chat/completions',{
       method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+AI_KEY},
-      body:JSON.stringify({model:AI_MODEL,response_format:{type:'json_object'},messages}),
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.api_key},
+      body:JSON.stringify({model:cfg.model,response_format:{type:'json_object'},messages}),
       signal: AbortSignal.timeout(8000)
     });
     const d=await r.json();
@@ -387,6 +407,11 @@ async function classifyIntent(message, history){
     return classifyByKeyword(message);
   }
 }
+
+// AI 配置表（网页可改，替代只能改 env 文件）
+try{ db.exec(`CREATE TABLE IF NOT EXISTS ai_config (
+  id INTEGER PRIMARY KEY CHECK (id=1), base_url TEXT, api_key TEXT,
+  model TEXT, context_max INTEGER, updated_at TEXT)`); }catch(e){}
 
 // 确保 skills 表存在（兼容旧库）
 try{ db.exec(`CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, content TEXT, status TEXT DEFAULT 'active', created_at TEXT, updated_at TEXT)`); }catch(e){}
@@ -407,12 +432,64 @@ async function handle(req,res){
   if (method==='GET' && p==='/api/healthz'){
     const counts={}; TABLES.forEach(t=>counts[t]=db.prepare(`SELECT count(*) n FROM ${q(t)}`).get().n);
     return json(res,200,{status:'ok',uptime_s:Math.round(process.uptime()),counts,
-      ai_enabled:!!(AI_BASE&&AI_KEY)});
+      ai_enabled:!!(getAIConfig().base_url&&getAIConfig().api_key)});
   }
   if (method==='POST' && p==='/api/auth/login'){
     const b=await readBody(req);
     if (!checkPwd(String(b.password||''))) return json(res,401,{detail:'密码错误'});
     return json(res,200,{token:signJWT(),expires_hours:JWT_TTL_H});
+  }
+
+  // ===== AI 模型配置（需 JWT）=====
+  if (p==='/api/ai/config' && method==='GET'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    const c=getAIConfig();
+    return json(res,200,{base_url:c.base_url, model:c.model, context_max:c.context_max,
+      api_key_masked:maskKey(c.api_key), api_key_set:!!c.api_key,
+      source:c.source, updated_at:c.updated_at});
+  }
+  if (p==='/api/ai/config' && method==='POST'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    const b=await readBody(req), cur=getAIConfig();
+    const base_url=String(b.base_url!==undefined?b.base_url:cur.base_url).trim().replace(/\/+$/,'');
+    const model=String(b.model!==undefined?b.model:cur.model).trim();
+    const cm=b.context_max!==undefined?parseInt(b.context_max,10):cur.context_max;
+    const context_max=(cm>0&&cm<=2000000)?cm:300000;
+    // 空 key = 不覆盖（脱敏回显的值原样提交也视为不覆盖）
+    let api_key=cur.api_key;
+    if(b.api_key!==undefined && String(b.api_key).trim()){
+      const v=String(b.api_key).trim();
+      if(!v.includes('…')) api_key=v;   // 含省略号 = 脱敏占位，忽略
+    }
+    if(!base_url) return json(res,400,{detail:'接口地址不能为空'});
+    db.prepare('INSERT OR REPLACE INTO ai_config (id,base_url,api_key,model,context_max,updated_at) VALUES (1,?,?,?,?,?)')
+      .run(base_url,api_key,model,context_max,now());
+    audit('api','update_ai_config','ai_config','1',JSON.stringify({base_url,model,context_max,key_changed:api_key!==cur.api_key}));
+    return json(res,200,{ok:true,base_url,model,context_max,api_key_masked:maskKey(api_key),key_changed:api_key!==cur.api_key});
+  }
+  if (p==='/api/ai/config/test' && method==='POST'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    const b=await readBody(req), cur=getAIConfig();
+    const base_url=String(b.base_url!==undefined?b.base_url:cur.base_url).trim().replace(/\/+$/,'');
+    const model=String(b.model!==undefined?b.model:cur.model).trim();
+    let api_key=cur.api_key;
+    if(b.api_key!==undefined && String(b.api_key).trim()){
+      const v=String(b.api_key).trim();
+      if(!v.includes('…')) api_key=v;
+    }
+    if(!base_url||!api_key||!model) return json(res,400,{detail:'请先填全接口地址、密钥和模型名'});
+    const t0=Date.now();
+    try{
+      const r=await fetch(base_url+'/chat/completions',{
+        method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+api_key},
+        body:JSON.stringify({model,messages:[{role:'user',content:'只回复两个字：正常'}],max_tokens:10}),
+        signal:AbortSignal.timeout(20000)
+      });
+      const d=await r.json();
+      if(!r.ok) return json(res,200,{ok:false,status:r.status,error:(d.error&&d.error.message)||JSON.stringify(d).slice(0,200),ms:Date.now()-t0});
+      const text=(d.choices?.[0]?.message?.content||'').trim();
+      return json(res,200,{ok:true,reply:text.slice(0,50),ms:Date.now()-t0,model});
+    }catch(e){ return json(res,200,{ok:false,error:String(e.message||e).slice(0,200),ms:Date.now()-t0}); }
   }
 
   // ===== APP Key 管理（需 JWT）=====
@@ -573,7 +650,7 @@ async function handle(req,res){
   // AI 问答（可选）
   if (p==='/api/ai/chat' && method==='POST'){
     if(!auth(req)) return json(res,401,{detail:'未登录'});
-    if(!AI_BASE||!AI_KEY) return json(res,503,{detail:'AI 未配置'});
+    if(!getAIConfig().base_url||!getAIConfig().api_key) return json(res,503,{detail:'AI 未配置'});
     const b=await readBody(req), qText=String(b.question||'');
     const sys='你是「潮汐」工作台助手。只使用提供的记录回答，字段为空就说空，绝不编造任务、日期或数值。';
     const messages=[{role:'system',content:sys+'\n\n'+buildContext(qText)},{role:'user',content:qText}];
@@ -626,7 +703,7 @@ async function handle(req,res){
       data.summary=rv;
       reply=rv.一句话+'\n完成：'+(rv.今日完成.join('、')||'无')+'。';
     } else if(intent.intent==='qa'){
-      if(!AI_BASE||!AI_KEY) return json(res,503,{detail:'AI 未配置'});
+      if(!getAIConfig().base_url||!getAIConfig().api_key) return json(res,503,{detail:'AI 未配置'});
       const sys='你是潮汐工作台助手。只使用提供的记录回答，字段为空就说空，绝不编造任务、日期或数值。';
       const resp=await callAI([{role:'system',content:sys+'\n\n'+buildContext(message)},{role:'user',content:message}],false);
       const d=await resp.json();
