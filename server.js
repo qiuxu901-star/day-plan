@@ -335,6 +335,18 @@ function agentRecord(slots){
       if(val==='明天') val=dateTomorrow();
       clean[k]=val;
     });
+    if(target==='time'){
+      ['开始时间','结束时间'].forEach(k=>{ if(clean[k]) clean[k]=normClock(clean[k]); });
+      if(clean['时长']) clean['时长']=normDuration(clean['时长']);
+      if(clean['日期'] && !/T/.test(String(clean['日期']))) clean['日期']=String(clean['日期']).slice(0,10)+'T00:00:00Z';
+      // 去重（T03）：同日期+事项+起止时间已有记录则更新而非新增
+      if(clean['事项']){
+        const d=String(clean['日期']||'').slice(0,10);
+        const dup=db.prepare("SELECT record_id FROM time WHERE 事项=? AND substr(日期,1,10)=? AND COALESCE(开始时间,'')=? AND COALESCE(结束时间,'')=? LIMIT 1")
+          .get(clean['事项'], d, clean['开始时间']||'', clean['结束时间']||'');
+        if(dup){ updateRecord('time', dup.record_id, clean, 'agent'); created.push(Object.assign({table:'time',dedup:true},clean,{record_id:dup.record_id})); return; }
+      }
+    }
     if(target==='task'){
       if(!clean['任务名称']){ errors.push('第'+(i+1)+'条缺少任务名称，未写入'); return; }
       if(!clean['状态']) clean['状态']='待办';
@@ -433,14 +445,48 @@ try{ db.exec(`CREATE TABLE IF NOT EXISTS ai_config (
 // Agent 提示词表（网页可编辑，可恢复默认）
 try{ db.exec(`CREATE TABLE IF NOT EXISTS prompts (
   key TEXT PRIMARY KEY, content TEXT, updated_at TEXT)`); }catch(e){}
+const PROMPT_KEYS=['intent','qa','system','strategic','coach','generator'];
+const DEFAULT_PROMPTS={intent:DEFAULT_INTENT, qa:DEFAULT_QA, system:'', strategic:'', coach:'', generator:''};
 function getPrompts(){
-  const out={intent:DEFAULT_INTENT, qa:DEFAULT_QA};
+  const out=Object.assign({},DEFAULT_PROMPTS);
   try{
-    db.prepare('SELECT key,content,updated_at FROM prompts').all().forEach(r=>{
-      if(r.key==='intent'||r.key==='qa') out[r.key]=r.content;
+    db.prepare('SELECT key,content FROM prompts').all().forEach(r=>{
+      if(PROMPT_KEYS.includes(r.key)) out[r.key]=r.content;
     });
   }catch(e){}
   return out;
+}
+// 时间/时长规范化：把中文口语转成机器可读格式
+function normClock(v){
+  let s=String(v==null?'':v).trim();
+  if(!s) return '';
+  // 中文数字时段：下午2点 / 上午9点半 / 晚上8点 / 中午12点
+  let m=s.match(/(上午|早上|早晨|中午|下午|晚上|傍晚|凌晨)?\s*(\d{1,2})\s*[:：点]\s*(\d{1,2})?\s*(半|分)?/);
+  if(m){
+    let h=parseInt(m[2],10), mi=m[3]?parseInt(m[3],10):(m[4]==='半'?30:0);
+    const ap=m[1]||'';
+    if((ap==='下午'||ap==='晚上'||ap==='傍晚') && h<12) h+=12;
+    if(ap==='凌晨' && h===12) h=0;
+    if(ap==='中午' && h<11) h+=12;
+    if(h>=0&&h<24&&mi<60) return String(h).padStart(2,'0')+':'+String(mi).padStart(2,'0');
+  }
+  // 纯数字 1330 / 930
+  m=s.match(/^(\d{3,4})$/);
+  if(m){ const n=m[1].padStart(4,'0'); const h=parseInt(n.slice(0,2),10), mi=parseInt(n.slice(2),10);
+    if(h<24&&mi<60) return n.slice(0,2)+':'+n.slice(2); }
+  return s; // 无法解析则原样保留，不臆造
+}
+function normDuration(v){
+  const s=String(v==null?'':v).trim();
+  let m=s.match(/(\d+(?:\.\d+)?)\s*(小时|时|h)/i);
+  if(m) return Math.round(parseFloat(m[1])*60);
+  m=s.match(/(\d+(?:\.\d+)?)\s*(分钟|分|min)/i);
+  if(m) return Math.round(parseFloat(m[1]));
+  m=s.match(/^(一|两|半|\d+)\s*个?小时$/);
+  if(m){ return {'一':60,'两':120,'半':30}[m[1]] || parseInt(m[1],10)*60; }
+  m=s.match(/^(\d+(?:\.\d+)?)$/);
+  if(m) return Math.round(parseFloat(m[1]));
+  return s;
 }
 
 // 确保 skills 表存在（兼容旧库）
@@ -477,14 +523,20 @@ async function handle(req,res){
     const cur=getPrompts();
     const rows=db.prepare('SELECT key,updated_at FROM prompts').all();
     const meta={}; rows.forEach(r=>meta[r.key]=r.updated_at);
-    return json(res,200,{intent:{content:cur.intent,custom:!!meta.intent,updated_at:meta.intent||''},
-      qa:{content:cur.qa,custom:!!meta.qa,updated_at:meta.qa||''}});
+    const out={};
+    PROMPT_KEYS.forEach(k=>{ out[k]={content:cur[k]||'',custom:!!meta[k],updated_at:meta[k]||''}; });
+    // 附带资料（验收用例/README）供 Agent 管理页展示
+    ['__tests','__readme'].forEach(k=>{
+      const row=db.prepare('SELECT content FROM prompts WHERE key=?').get(k);
+      if(row) out[k]={content:row.content||'',custom:false,updated_at:''};
+    });
+    return json(res,200,out);
   }
   if (p==='/api/prompts' && method==='POST'){
     if(!auth(req)) return json(res,401,{detail:'未登录'});
     const b=await readBody(req);
     db.exec(`CREATE TABLE IF NOT EXISTS prompts (key TEXT PRIMARY KEY, content TEXT, updated_at TEXT)`);
-    ['intent','qa'].forEach(k=>{
+    PROMPT_KEYS.forEach(k=>{
       if(b[k]!==undefined){
         const v=String(b[k]);
         if(v.trim()) db.prepare('INSERT OR REPLACE INTO prompts (key,content,updated_at) VALUES (?,?,?)').run(k,v,now());
@@ -497,8 +549,9 @@ async function handle(req,res){
     if(!auth(req)) return json(res,401,{detail:'未登录'});
     const b=await readBody(req), k=String(b.key||'all');
     db.exec(`CREATE TABLE IF NOT EXISTS prompts (key TEXT PRIMARY KEY, content TEXT, updated_at TEXT)`);
-    if(k==='all') db.prepare('DELETE FROM prompts').run();
+    if(k==='all') db.prepare("DELETE FROM prompts WHERE key IN ('intent','qa')").run();
     else if(k==='intent'||k==='qa') db.prepare('DELETE FROM prompts WHERE key=?').run(k);
+    else if(PROMPT_KEYS.includes(k)) return json(res,400,{detail:'该提示词由套件导入，请用编辑保存修改，不能恢复默认'});
     else return json(res,400,{detail:'未知提示词'});
     audit('api','reset_prompts','prompts','1',k);
     return json(res,200,{ok:true,reset:k});
@@ -716,7 +769,8 @@ async function handle(req,res){
     if(!auth(req)) return json(res,401,{detail:'未登录'});
     if(!getAIConfig().base_url||!getAIConfig().api_key) return json(res,503,{detail:'AI 未配置'});
     const b=await readBody(req), qText=String(b.question||'');
-    const sys=getPrompts().qa;
+    const pr=getPrompts();
+    const sys=(pr.system?pr.system+'\n\n---\n\n':'')+pr.qa;
     const messages=[{role:'system',content:sys+'\n\n'+buildContext(qText)},{role:'user',content:qText}];
     const resp=await callAI(messages,false);
     const data=await resp.json();
@@ -768,7 +822,8 @@ async function handle(req,res){
       reply=rv.一句话+'\n完成：'+(rv.今日完成.join('、')||'无')+'。';
     } else if(intent.intent==='qa'){
       if(!getAIConfig().base_url||!getAIConfig().api_key) return json(res,503,{detail:'AI 未配置'});
-      const sys=getPrompts().qa;
+      const pr=getPrompts();
+      const sys=(pr.system?pr.system+'\n\n---\n\n':'')+pr.qa;
       const resp=await callAI([{role:'system',content:sys+'\n\n'+buildContext(message)},{role:'user',content:message}],false);
       const d=await resp.json();
       reply=d.choices?.[0]?.message?.content||'（无返回）';

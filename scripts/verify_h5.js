@@ -74,9 +74,10 @@ setTimeout(() => {
   checks.push(['模型配置页面存在', !!d.getElementById('view-aiconfig')]);
   checks.push(['模型配置导航2处', d.querySelectorAll('[data-view="aiconfig"]').length===2]);
   checks.push(['模型配置字段齐全', !!d.getElementById('aiBaseUrl') && !!d.getElementById('aiModel') && !!d.getElementById('aiKey') && !!d.getElementById('aiCtxMax')]);
-  checks.push(['提示词编辑区存在', !!d.getElementById('pmIntent') && !!d.getElementById('pmQa')]);
-  checks.push(['提示词保存/重置按钮', !!d.getElementById('pmSave') && !!d.getElementById('pmResetAll')]);
-  checks.push(['单段恢复默认按钮2个', d.querySelectorAll('.pm-reset').length===2]);
+  checks.push(['Agent管理独立页存在', !!d.getElementById('view-agentadmin')]);
+  checks.push(['Agent管理导航2处', d.querySelectorAll('[data-view="agentadmin"]').length===2]);
+  checks.push(['提示词编辑器存在', !!d.getElementById('pmText') && !!d.getElementById('pmSave')]);
+  checks.push(['技能库与验收区存在', !!d.getElementById('kitSkillList') && !!d.getElementById('kitTests')]);
   checks.push(['Agent对话区存在', !!d.getElementById('agentDock')]);
   checks.push(['鲸鱼SVG存在', !!d.querySelector('.wb-whale')]);
   checks.push(['快捷指令4个', d.querySelectorAll('#agentQuick button').length===4]);
