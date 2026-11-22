@@ -1249,8 +1249,11 @@ async function handle(req,res){
             body:JSON.stringify({model:cfg.model,response_format:{type:'json_object'},messages:[{role:'system',content:sys},{role:'user',content:message}]}),
             signal:AbortSignal.timeout(25000)});
           const d=await r.json();
-          tc=JSON.parse((d.choices?.[0]?.message?.content||'').replace(/```json|```/g,'').trim());
-        }catch(e){ return json(res,200,{ok:false,intent:'tool',reply:'工具选择失败，请再说一次具体要做什么。'}); }
+          let raw=(d.choices?.[0]?.message?.content||'').replace(/```json|```/g,'').trim();
+          console.error('[tool-select] raw:',raw.slice(0,300));
+          const m=raw.match(/\{[\s\S]*\}/);
+          tc=JSON.parse(m?m[0]:raw);
+        }catch(e){ console.error('[tool-select] fail:',e.message); return json(res,200,{ok:false,intent:'tool',reply:'工具选择失败，请再说一次具体要做什么。'}); }
       }
       if(!tc || !TOOL_NAMES.includes(tc.tool)) return json(res,200,{ok:false,intent:'tool',reply:'没找到合适的工具，能说具体点吗？'});
       try{
