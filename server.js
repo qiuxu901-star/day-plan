@@ -15,7 +15,7 @@ const JWT_SECRET = process.env.WB_JWT_SECRET || 'dev-only-change-me';
 const ADMIN_PASSWORD = process.env.WB_ADMIN_PASSWORD || 'workboard';
 const ADMIN_HASH = process.env.WB_ADMIN_PASSWORD_HASH || '';
 const JWT_TTL_H = parseInt(process.env.WB_JWT_TTL_HOURS || '168', 10);
-const RATE_LIMIT = parseInt(process.env.WB_RATE_LIMIT || '60', 10);
+const RATE_LIMIT = parseInt(process.env.WB_RATE_LIMIT || '300', 10);
 const PORT = parseInt(process.env.WB_PORT || '8100', 10);
 const HOST = process.env.WB_HOST || '127.0.0.1';
 
@@ -999,18 +999,22 @@ async function handle(req,res){
   return json(res,404,{detail:'Not Found'});
 }
 
-const server=http.createServer((req,res)=>{
-  handle(req,res).catch(e=>{
-    console.error(e);
-    try{ json(res,500,{detail:String(e.message||e)}); }catch(_){}
-  });
-});
-// 简易限流
+// 简易限流：必须在唯一的请求入口里执行，不能另挂 'request' listener
+// （createServer 回调与 on('request') 会对同一请求各触发一次 → 重复写响应 ERR_HTTP_HEADERS_SENT）
 const buckets=new Map();
-server.on('request',(req,res)=>{
+function rateLimited(req){
   const k=req.headers['x-api-key']||req.socket.remoteAddress;
   const arr=(buckets.get(k)||[]).filter(t=>Date.now()-t<60000);
-  if(arr.length>=RATE_LIMIT){ return json(res,429,{detail:'请求过于频繁'}); }
+  if(arr.length>=RATE_LIMIT) return true;
   arr.push(Date.now()); buckets.set(k,arr);
+  return false;
+}
+const server=http.createServer((req,res)=>{
+  if(rateLimited(req)) return json(res,429,{detail:'请求过于频繁，请稍后再试'});
+  handle(req,res).catch(e=>{
+    console.error(e);
+    // 响应可能已发出（如流式中途失败），必须先检查，避免二次 writeHead
+    if(!res.headersSent){ try{ json(res,500,{detail:String(e.message||e)}); }catch(_){} }
+  });
 });
 server.listen(PORT,HOST,()=>console.log(`WorkBoard API listening ${HOST}:${PORT}`));
