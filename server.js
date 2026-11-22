@@ -494,6 +494,33 @@ function classifyByKeyword(text){
   return {intent:'chitchat',confidence:0.5,slots:{},reason:'无法识别'};
 }
 
+// 意图识别 Skill：优先从技能库读取（可在 Agent 管理页编辑），回落 prompts.intent
+function getIntentSystem(){
+  try{
+    const r=db.prepare("SELECT content FROM skills WHERE name=? AND status=?").get('intent-router','active');
+    if(r && r.content && r.content.length>100) return r.content;
+  }catch(e){}
+  return getPrompts().intent;
+}
+// 自由兜底回复：让 Agent 自然接话，不再固定自我介绍
+async function freeReply(message, history){
+  try{
+    const cfg=getAIConfig();
+    if(!cfg.base_url||!cfg.api_key) return null;
+    let ctx=(history||[]).slice(-10).map(x=>(x.role==='me'?'用户':'助手')+': '+String(x.text||'').slice(0,300)).join('\n');
+    const sys=getPrompts().system||'你是潮汐，用户的时间与精力助手。';
+    const r=await fetch(cfg.base_url.replace(/\/+$/,'')+'/chat/completions',{
+      method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.api_key},
+      body:JSON.stringify({model:cfg.model,messages:[
+        {role:'system',content:sys+'\n\n你是自然对话的助手。用中文、简洁（1-3句）。可以自我介绍、回应问候、澄清用户想做什么，但不要固定套话。若用户在问信息，引导ta具体说要查什么（任务/时间/想法/复盘）。'},
+        {role:'user',content:(ctx?('近期对话：\n'+ctx+'\n\n'):'')+message}
+      ]}),signal:AbortSignal.timeout(15000)
+    });
+    const d=await r.json();
+    return (d.choices?.[0]?.message?.content||'').trim() || null;
+  }catch(e){ return null; }
+}
+
 async function classifyIntent(message, history){
   const cfg=getAIConfig();
   if(!cfg.base_url||!cfg.api_key) return classifyByKeyword(message);
@@ -503,7 +530,7 @@ async function classifyIntent(message, history){
   const ctxMax=cfg.context_max;
   if(ctx.length>ctxMax) ctx=ctx.slice(-ctxMax);
   const messages=[
-    {role:'system',content:getPrompts().intent},
+    {role:'system',content:getIntentSystem()},
     {role:'user',content:(ctx?('近期对话：\n'+ctx+'\n\n'):'')+'当前输入：'+message}
   ];
   try{
@@ -986,7 +1013,8 @@ async function handle(req,res){
     } else if(intent.intent==='create_skill'){
       return json(res,200,agentCreateSkill(intent.slots));
     } else {
-      reply='我是潮汐，你的时间与精力助手。可以说「开工」看今天重点，或直接告诉我今天的计划，我帮你记下来。';
+      reply=(await freeReply(message,b.history)) ||
+        '我是潮汐，你的时间与精力助手。可以说「开工」看今天重点，或直接告诉我今天的计划，我帮你记下来。';
     }
     return json(res,200,{ok:true,intent:intent.intent,confidence:conf,reply,data,audit_ids,undoable:audit_ids.length>0});
   }
