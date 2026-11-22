@@ -777,6 +777,16 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .ae-prompt{display:block;width:100%;margin:8px 0;padding:11px 16px;border:1px solid var(--line);
     border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;cursor:pointer;text-align:left;transition:.2s}
   .ae-prompt:hover{border-color:var(--sage);color:var(--sage);background:var(--sage-soft)}
+  /* ===== Markdown 表格样式 ===== */
+  .agent-bubble .md-table-wrap{width:100%;max-width:100%;overflow-x:auto;margin:8px 0;border-radius:10px;border:1px solid var(--line)}
+  .agent-bubble table.md-table{width:100%;border-collapse:collapse;font-size:12px;line-height:1.5}
+  .md-table th{background:var(--sage-soft);color:var(--ink);font-weight:600;text-align:left;padding:7px 9px;white-space:nowrap;border-bottom:1px solid var(--line)}
+  .md-table td{padding:6px 9px;border-bottom:1px solid var(--line);vertical-align:top;word-break:break-word}
+  .md-table tr:last-child td{border-bottom:0}
+  .md-table tbody tr:nth-child(even) td{background:var(--paper)}
+  .agent-bubble p{margin:3px 0}
+  .agent-bubble p:empty{margin:0}
+  .agent-bubble code{background:var(--paper);padding:1px 4px;border-radius:4px;font-family:ui-monospace,monospace;font-size:11px}
 </style>
 </head>
 <body data-page-node-id="hwziI2PCj4FjvP8nQPS6mO">
@@ -3787,6 +3797,44 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
     };
   }
 
+  // 安全的 Markdown 子集渲染：先整体转义，再识别表格/粗体/行内代码
+  function mdToHtml(text){
+    var raw=String(text==null?'':text);
+    // 先按行处理，转义每行
+    var lines=raw.split('\n');
+    var out=[], inTable=false, tableRows=[];
+    function flushTable(){
+      if(!tableRows.length) return;
+      var html='<div class="md-table-wrap"><table class="md-table">';
+      tableRows.forEach(function(cells,i){
+        if(i===1 && cells.every(function(c){ return /^:?-{2,}:?$/.test(c.replace(/\s/g,'')); })) return; // 分隔行
+        var tag=i===0?'th':'td';
+        html+='<tr>'+cells.map(function(c){ return '<'+tag+'>'+inline(c)+'</'+tag+'>'; }).join('')+'</tr>';
+      });
+      out.push(html+'</table></div>');
+      tableRows=[];
+    }
+    function inline(t){
+      return String(t).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+        .replace(/`([^`]+)`/g,'<code>$1</code>');
+    }
+    lines.forEach(function(line){
+      var trimmed=line.trim();
+      // 表格行：以 | 开头且含分隔
+      if(/^\|.*\|$/.test(trimmed)){
+        inTable=true;
+        var cells=trimmed.slice(1,-1).split('|').map(function(c){ return escHtml(c.trim()); });
+        tableRows.push(cells);
+      } else {
+        if(inTable){ flushTable(); inTable=false; }
+        if(!trimmed) out.push('');
+        else out.push('<p>'+inline(escHtml(trimmed))+'</p>');
+      }
+    });
+    if(inTable) flushTable();
+    return out.join('');
+  }
+
   function agentBubble(role, html, meta){
     var box=$('agentThread'); if(!box) return;
     var d=document.createElement('div');
@@ -3839,7 +3887,7 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
           agentState.history.push({role:'ai',text:'（已生成技能草稿，等待确认）'});
           return;
         }
-        var html=escHtml(r.reply||'');
+        var html=mdToHtml(r.reply||'');
         if(r.data && r.data.top3 && r.data.top3.length){
           html+='<div class="agent-top3">'+r.data.top3.map(function(t){
             return '<span>'+escHtml('['+(t.优先级||'')+'] '+t.任务+' · '+t.分数+'分')+'</span>';

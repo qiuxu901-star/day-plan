@@ -205,18 +205,88 @@ function maskKey(k){
   if(k.length<=10) return k.slice(0,2)+'…'+k.slice(-2);
   return k.slice(0,6)+'…'+k.slice(-4);
 }
-function buildContext(question){
-  // 全表轻量上下文：默认排除留痕表（227 行），按日期/关键词粗过滤
-  const parts=[];
-  const tables=['task','time','inbox','review','week','milestone'];
-  tables.forEach(t=>{
-    const rows=db.prepare(`SELECT * FROM ${q(t)} LIMIT 200`).all();
-    if (!rows.length) return;
-    const c=cols(t).filter(x=>!META_COLS.has(x));
-    const lines=rows.slice(0,120).map(r=>c.map(k=>`${k}:${r[k]??''}`).join(' | '));
-    parts.push(`【${LABELS[t]} ${rows.length}条】\n${lines.join('\n')}`);
+// ===== 历史查询：按日期/关键词/类型定向检索 =====
+function parseHistoryQuery(question){
+  const t=String(question||'');
+  const out={dateFrom:'',dateTo:'',keyword:'',tables:[],limit:60};
+  // 日期：绝对 YYYY-MM-DD
+  let m=t.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m){ const d=m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0'); out.dateFrom=d; out.dateTo=d; }
+  // 年月：2026年8月 / 8月
+  if(!out.dateFrom){
+    m=t.match(/(\d{4})年(\d{1,2})月/);
+    if(m){ out.dateFrom=m[1]+'-'+String(m[2]).padStart(2,'0')+'-01';
+      out.dateTo=m[1]+'-'+String(parseInt(m[2],10)+1).padStart(2,'0')+'-01'; }
+    else { m=t.match(/(\d{1,2})月/);
+      if(m){ const yr=new Date().getFullYear(); out.dateFrom=yr+'-'+String(m[1]).padStart(2,'0')+'-01';
+        out.dateTo=yr+'-'+String(parseInt(m[1],10)+1).padStart(2,'0')+'-01'; } }
+  }
+  // 相对日：昨天/前天/今天/上周
+  if(!out.dateFrom){
+    const base=new Date();
+    if(/上周/.test(t)){ const d=new Date(base); d.setDate(d.getDate()-7); out.dateFrom=d.toISOString().slice(0,10); out.dateTo=new Date().toISOString().slice(0,10); }
+    else if(/前天/.test(t)){ const d=new Date(base); d.setDate(d.getDate()-2); out.dateFrom=d.toISOString().slice(0,10); out.dateTo=out.dateFrom; }
+    else if(/昨天/.test(t)){ const d=new Date(base); d.setDate(d.getDate()-1); out.dateFrom=d.toISOString().slice(0,10); out.dateTo=out.dateFrom; }
+    else if(/今天|今日/.test(t)){ out.dateFrom=new Date().toISOString().slice(0,10); out.dateTo=out.dateFrom; }
+  }
+  // 表类型提示词
+  if(/时间|做了什么|花了|小时|分钟|时段|记录/.test(t)) out.tables.push('time');
+  if(/想法|收集|问题|思考|点子/.test(t)) out.tables.push('inbox');
+  if(/任务|待办|完成|计划|P0|P1|P2/i.test(t)) out.tables.push('task');
+  if(/复盘|卡点|总结|明日计划/.test(t)) out.tables.push('review');
+  if(/周目标|周计划|关键结果|本周|下周/.test(t)) out.tables.push('week');
+  if(!out.tables.length) out.tables=['task','time','inbox','review','week'];
+  // 关键词：去掉问句/日期/类型词后取最长中文片段
+  let kw=t.replace(/\d{4}-\d{1,2}-\d{1,2}|\d{4}年\d{1,2}月|\d{1,2}月|上周|前天|昨天|今天|今日|我|的|了|吗|呢|什么|哪些|多少|有|查|看|问|下|关于|记录|时间|任务|计划|复盘|想法|收集|问题|思考|待办|完成|做了|花了|小时|分钟|时段|本周|下周|周目标|周计划|关键结果|P0|P1|P2/gi,' ').trim();
+  kw=kw.split(/[，。？！、,\s]+/).filter(x=>x.length>=2).sort((a,b)=>b.length-a.length)[0]||'';
+  out.keyword=kw.slice(0,20);
+  return out;
+}
+function historySearch(question){
+  const ps=parseHistoryQuery(question);
+  const parts=[]; const found={};
+  const dateCol={task:'计划日',time:'日期',inbox:'记录日期',review:'日期',week:'周次'};
+  ps.tables.forEach(t=>{
+    const cs=cols(t).filter(x=>!META_COLS.has(x));
+    const where=[], args=[];
+    const dc=dateCol[t];
+    if(ps.dateFrom && cs.includes(dc)){ where.push(`substr(${q(dc)},1,10)>=?`); args.push(ps.dateFrom);
+      if(ps.dateTo){ where.push(`substr(${q(dc)},1,10)<?`); args.push(ps.dateTo); } }
+    if(ps.keyword){
+      const kws=cs.filter(c=>/名称|内容|事项|备注|完成|困难|计划|目标|总结|结果|标签/.test(c));
+      if(kws.length){ where.push('('+kws.map(c=>`${q(c)} LIKE ?`).join(' OR ')+')'); kws.forEach(()=>args.push('%'+ps.keyword+'%')); }
+    }
+    const sql=`SELECT * FROM ${q(t)}`+(where.length?' WHERE '+where.join(' AND '):'')+
+      ` ORDER BY rowid DESC LIMIT ${ps.limit}`;
+    let rows=[];
+    try{ rows=db.prepare(sql).all(...args); }catch(e){ return; }
+    if(!rows.length) return;
+    found[t]=rows.length;
+    const lines=rows.map(r=>cs.map(k=>`${k}:${r[k]??''}`).join(' | '));
+    parts.push(`【${LABELS[t]} 命中${rows.length}条】\n${lines.join('\n')}`);
   });
-  return parts.join('\n\n').slice(0, 30000);
+  const head=`【历史查询条件】日期 ${ps.dateFrom||'不限'}~${ps.dateTo||'不限'}｜关键词 ${ps.keyword||'无'}｜查表 ${ps.tables.join('/')}\n`;
+  const body=parts.length?parts.join('\n\n'):'【未命中任何记录】可适当放宽条件或说明无数据，不得编造。';
+  return {text:(head+body).slice(0,30000), found, params:ps};
+}
+function buildContext(question){
+  const r=historySearch(question);
+  if(r){
+    const hits=Object.values(r.found).reduce((a,b)=>a+b,0);
+    // 命中过少时补充全表概览（宽泛问题的兜底）
+    if(hits<3){
+      const parts=[r.text];
+      ['task','time','inbox','review','week'].forEach(t=>{
+        const rows=db.prepare(`SELECT * FROM ${q(t)} ORDER BY rowid DESC LIMIT 30`).all();
+        if(!rows.length) return;
+        const cs=cols(t).filter(x=>!META_COLS.has(x));
+        parts.push(`【${LABELS[t]} 概览(最近${rows.length}条)】\n`+rows.map(x=>cs.map(k=>`${k}:${x[k]??''}`).join(' | ')).join('\n'));
+      });
+      return parts.join('\n\n').slice(0,30000);
+    }
+    return r.text;
+  }
+  return '';
 }
 async function callAI(messages, stream){
   const cfg=getAIConfig();
