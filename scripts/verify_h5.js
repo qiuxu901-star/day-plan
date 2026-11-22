@@ -49,6 +49,7 @@ const dom = new JSDOM(html, {
       else if (url.includes('/api/keys')) body = url.includes('method') ? {id:'k_test',key:'wb_fake',scope:'read'} : [{id:'k_test',scope:'read',note:'测试',revoked:0,created_at:'2026-11-21'}];
       else if (url.includes('/api/skills')) body = [{id:'s_test',name:'测试技能',description:'_desc',content:'_content',updated_at:'2026-11-21'}];
       else if (url.includes('/api/ai/config')) body = {base_url:'https://api.deepseek.com',model:'deepseek-chat',context_max:300000,api_key_masked:'sk-8b0…acf3',api_key_set:true,source:'database'};
+      else if (url.includes('/api/prompts')) body = {intent:{content:'默认意图词',custom:false,updated_at:''},qa:{content:'默认问答词',custom:false,updated_at:''}};
       else if (url.includes('/api/agent/chat')) body = {ok:true,intent:'start',reply:'当前最重要的3件事',data:{top3:[{任务:'测试',优先级:'P1',分数:140}]},audit_ids:[],undoable:false};
       else body = {record_id:'new-1'};
       return Promise.resolve({ok:true, status:200, json:()=>Promise.resolve(body)});
@@ -73,6 +74,9 @@ setTimeout(() => {
   checks.push(['模型配置页面存在', !!d.getElementById('view-aiconfig')]);
   checks.push(['模型配置导航2处', d.querySelectorAll('[data-view="aiconfig"]').length===2]);
   checks.push(['模型配置字段齐全', !!d.getElementById('aiBaseUrl') && !!d.getElementById('aiModel') && !!d.getElementById('aiKey') && !!d.getElementById('aiCtxMax')]);
+  checks.push(['提示词编辑区存在', !!d.getElementById('pmIntent') && !!d.getElementById('pmQa')]);
+  checks.push(['提示词保存/重置按钮', !!d.getElementById('pmSave') && !!d.getElementById('pmResetAll')]);
+  checks.push(['单段恢复默认按钮2个', d.querySelectorAll('.pm-reset').length===2]);
   checks.push(['Agent对话区存在', !!d.getElementById('agentDock')]);
   checks.push(['鲸鱼SVG存在', !!d.querySelector('.wb-whale')]);
   checks.push(['快捷指令4个', d.querySelectorAll('#agentQuick button').length===4]);

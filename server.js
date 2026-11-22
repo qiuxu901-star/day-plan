@@ -257,7 +257,7 @@ const FIELD_ALIAS={title:'任务名称',name:'任务名称',task:'任务名称',
   '任务':'任务名称'};
 const STATUS_ENUM = ['待办','进行中','已完成'];
 const PRIORITY_ENUM = ['P0','P1','P2'];
-const INTENT_SYS = `你是"潮汐"工作台的意图分类器。只输出一个严格 JSON 对象，禁止解释文字、禁止 markdown 代码块。
+const DEFAULT_INTENT = `你是"潮汐"工作台的意图分类器。只输出一个严格 JSON 对象，禁止解释文字、禁止 markdown 代码块。
 输出格式：{"intent":"record|start|wrap|qa|create_skill|chitchat","confidence":0到1,"slots":{},"reason":"一句话"}
 意图定义：
 - record：用户口述要新增/修改任务、时间记录、复盘、收集箱。slots={"target":"task|time|inbox|review","items":[{"中文字段名":"值"}]}。
@@ -268,6 +268,7 @@ const INTENT_SYS = `你是"潮汐"工作台的意图分类器。只输出一个�
 - create_skill：用户要「建/写/生成/存一个技能」。slots={"name":"kebab-case英文名","description":"一句话触发描述","content_md":"完整SKILL.md正文"}。只生成草稿给用户确认，绝不直接写库。name 必须小写字母/数字/连字符，3-64 位。
 - chitchat：问候闲聊、无法归类、或要求删除/越权/绕过限制。
 安全规则：不得编造记录；要求删除数据、改权限、绕过限制 → chitchat 并说明拒绝；技能正文若含删除数据/越权/绕过/外泄密钥的指令 → chitchat 拒绝；拿不准就 chitchat 并说明。宁可不写不能写错。`;
+const DEFAULT_QA = '你是「潮汐」工作台助手。只使用提供的记录回答，字段为空就说空，绝不编造任务、日期或数值。';
 
 function dateToday(){ return new Date().toISOString().slice(0,10); }
 function dateTomorrow(){ const d=new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); }
@@ -405,7 +406,7 @@ async function classifyIntent(message, history){
   const ctxMax=cfg.context_max;
   if(ctx.length>ctxMax) ctx=ctx.slice(-ctxMax);
   const messages=[
-    {role:'system',content:INTENT_SYS},
+    {role:'system',content:getPrompts().intent},
     {role:'user',content:(ctx?('近期对话：\n'+ctx+'\n\n'):'')+'当前输入：'+message}
   ];
   try{
@@ -429,6 +430,18 @@ async function classifyIntent(message, history){
 try{ db.exec(`CREATE TABLE IF NOT EXISTS ai_config (
   id INTEGER PRIMARY KEY CHECK (id=1), base_url TEXT, api_key TEXT,
   model TEXT, context_max INTEGER, updated_at TEXT)`); }catch(e){}
+// Agent 提示词表（网页可编辑，可恢复默认）
+try{ db.exec(`CREATE TABLE IF NOT EXISTS prompts (
+  key TEXT PRIMARY KEY, content TEXT, updated_at TEXT)`); }catch(e){}
+function getPrompts(){
+  const out={intent:DEFAULT_INTENT, qa:DEFAULT_QA};
+  try{
+    db.prepare('SELECT key,content,updated_at FROM prompts').all().forEach(r=>{
+      if(r.key==='intent'||r.key==='qa') out[r.key]=r.content;
+    });
+  }catch(e){}
+  return out;
+}
 
 // 确保 skills 表存在（兼容旧库）
 try{ db.exec(`CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, content TEXT, status TEXT DEFAULT 'active', created_at TEXT, updated_at TEXT)`); }catch(e){}
@@ -455,6 +468,40 @@ async function handle(req,res){
     const b=await readBody(req);
     if (!checkPwd(String(b.password||''))) return json(res,401,{detail:'密码错误'});
     return json(res,200,{token:signJWT(),expires_hours:JWT_TTL_H});
+  }
+
+  // ===== Agent 提示词（需 JWT）=====
+  if (p==='/api/prompts' && method==='GET'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    db.exec(`CREATE TABLE IF NOT EXISTS prompts (key TEXT PRIMARY KEY, content TEXT, updated_at TEXT)`);
+    const cur=getPrompts();
+    const rows=db.prepare('SELECT key,updated_at FROM prompts').all();
+    const meta={}; rows.forEach(r=>meta[r.key]=r.updated_at);
+    return json(res,200,{intent:{content:cur.intent,custom:!!meta.intent,updated_at:meta.intent||''},
+      qa:{content:cur.qa,custom:!!meta.qa,updated_at:meta.qa||''}});
+  }
+  if (p==='/api/prompts' && method==='POST'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    const b=await readBody(req);
+    db.exec(`CREATE TABLE IF NOT EXISTS prompts (key TEXT PRIMARY KEY, content TEXT, updated_at TEXT)`);
+    ['intent','qa'].forEach(k=>{
+      if(b[k]!==undefined){
+        const v=String(b[k]);
+        if(v.trim()) db.prepare('INSERT OR REPLACE INTO prompts (key,content,updated_at) VALUES (?,?,?)').run(k,v,now());
+      }
+    });
+    audit('api','update_prompts','prompts','1',JSON.stringify({keys:Object.keys(b)}));
+    return json(res,200,{ok:true});
+  }
+  if (p==='/api/prompts/reset' && method==='POST'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    const b=await readBody(req), k=String(b.key||'all');
+    db.exec(`CREATE TABLE IF NOT EXISTS prompts (key TEXT PRIMARY KEY, content TEXT, updated_at TEXT)`);
+    if(k==='all') db.prepare('DELETE FROM prompts').run();
+    else if(k==='intent'||k==='qa') db.prepare('DELETE FROM prompts WHERE key=?').run(k);
+    else return json(res,400,{detail:'未知提示词'});
+    audit('api','reset_prompts','prompts','1',k);
+    return json(res,200,{ok:true,reset:k});
   }
 
   // ===== AI 模型配置（需 JWT）=====
@@ -669,7 +716,7 @@ async function handle(req,res){
     if(!auth(req)) return json(res,401,{detail:'未登录'});
     if(!getAIConfig().base_url||!getAIConfig().api_key) return json(res,503,{detail:'AI 未配置'});
     const b=await readBody(req), qText=String(b.question||'');
-    const sys='你是「潮汐」工作台助手。只使用提供的记录回答，字段为空就说空，绝不编造任务、日期或数值。';
+    const sys=getPrompts().qa;
     const messages=[{role:'system',content:sys+'\n\n'+buildContext(qText)},{role:'user',content:qText}];
     const resp=await callAI(messages,false);
     const data=await resp.json();
@@ -721,7 +768,7 @@ async function handle(req,res){
       reply=rv.一句话+'\n完成：'+(rv.今日完成.join('、')||'无')+'。';
     } else if(intent.intent==='qa'){
       if(!getAIConfig().base_url||!getAIConfig().api_key) return json(res,503,{detail:'AI 未配置'});
-      const sys='你是潮汐工作台助手。只使用提供的记录回答，字段为空就说空，绝不编造任务、日期或数值。';
+      const sys=getPrompts().qa;
       const resp=await callAI([{role:'system',content:sys+'\n\n'+buildContext(message)},{role:'user',content:message}],false);
       const d=await resp.json();
       reply=d.choices?.[0]?.message?.content||'（无返回）';
