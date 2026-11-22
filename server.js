@@ -856,13 +856,14 @@ async function handle(req,res){
   // 业务 API（JWT）
   if (p.startsWith('/api/v1/')){
     if(!auth(req)) return json(res,401,{detail:'未登录'});
-    const seg=p.split('/').filter(Boolean); // api v1 [table] [rid?]
-    const t=seg[2], rid=seg[3];
-    if(!TABLES.includes(t)) return json(res,400,{detail:'未知表'});
+    // 特殊路由必须在表白名单校验之前：否则 seg[2]='meta'/'stats' 被误判未知表
     if(p==='/api/v1/meta/tables'&&method==='GET') return json(res,200,metaTables());
     if(p==='/api/v1/stats'&&method==='GET'){
       const s={}; TABLES.forEach(x=>s[x]=db.prepare(`SELECT count(*) n FROM ${q(x)}`).get().n); return json(res,200,s);
     }
+    const seg=p.split('/').filter(Boolean); // api v1 [table] [rid?]
+    const t=seg[2], rid=seg[3];
+    if(!TABLES.includes(t)) return json(res,400,{detail:'未知表'});
     if(method==='GET' && !rid){
       let filters=null; try{ filters=u.searchParams.get('filters')?JSON.parse(u.searchParams.get('filters')):null; }catch(e){ return json(res,400,{detail:'filters 非法'}); }
       return json(res,200,listRecords(t,{page:parseInt(u.searchParams.get('page')||'1'),
