@@ -140,7 +140,7 @@ function addRecord(table, payload, actor, enqueueSync=true){
   const c = cols(table);
   const biz = {};
   Object.entries(payload).forEach(([k,v])=>{
-    if (c.includes(k) && !META_COLS.has(k) && v!==null && v!==undefined) biz[k]=v;
+    if (c.includes(k) && !META_COLS.has(k) && v!==null && v!==undefined) biz[k]=unwrapOneof(v);
   });
   const rid = payload.record_id || crypto.createHash('sha1')
     .update(JSON.stringify(payload)+now()).digest('hex');
@@ -151,13 +151,23 @@ function addRecord(table, payload, actor, enqueueSync=true){
   if (enqueueSync) enqueue(table,rid,'add',biz);
   return {record_id:rid};
 }
+// 兼容平台 oneof 格式：{text/select/date/number} → 裸值
+function unwrapOneof(v){
+  if(v && typeof v==='object' && !Array.isArray(v)){
+    if(v.text!==undefined) return v.text;
+    if(v.select!==undefined) return v.select;
+    if(v.date!==undefined) return v.date;
+    if(v.number!==undefined) return v.number;
+  }
+  return v;
+}
 function updateRecord(table, rid, payload, actor, enqueueSync=true){
   const existing = db.prepare(`SELECT * FROM ${q(table)} WHERE record_id=?`).get(rid);
   if (!existing) return null;
   const c = cols(table);
   const biz = {};
   Object.entries(payload).forEach(([k,v])=>{
-    if (c.includes(k) && !META_COLS.has(k) && v!==null && v!==undefined) biz[k]=v;
+    if (c.includes(k) && !META_COLS.has(k) && v!==null && v!==undefined) biz[k]=unwrapOneof(v);
   });
   if (Object.keys(biz).length){
     const sets=Object.keys(biz).map(k=>`${q(k)}=?`).join(',');
