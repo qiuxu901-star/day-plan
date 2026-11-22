@@ -257,6 +257,45 @@ function toolAudit(action, detail){
   audit('agent-tool',action,'agent_tool','',JSON.stringify(detail||{}).slice(0,800));
   return db.prepare('SELECT last_insert_rowid() id').get().id;
 }
+// 工具结果 → 人类可读文本（确定性，不经 LLM）
+function formatToolResult(tool, r){
+  if(!r) return '工具执行完毕，无返回内容。';
+  if(r.ok===false) return '执行失败：'+(r.error||'未知错误');
+  try{
+    switch(tool){
+      case 'list_records': {
+        const rows=r.items||[];
+        if(!rows.length) return `${r.table} 没有匹配的记录（共 ${r.total} 条）。`;
+        const keys=Object.keys(rows[0]).filter(k=>!k.startsWith('_')).slice(0,6);
+        const lines=rows.slice(0,30).map(x=>keys.map(k=>`${k}: ${x[k]??''}`).join(' / '));
+        return `${r.table} 命中 ${r.total} 条（显示前 ${lines.length} 条）\n`+lines.join('\n');
+      }
+      case 'sync_status': return `同步队列：待处理 ${r.pending} 条`+(r.by_table&&r.by_table.length?'\n'+r.by_table.map(x=>`${x.table_name} ${x.op}: ${x.n}`).join('\n'):'');
+      case 'list_keys': return (r.length?r:[]).map(k=>`${k.id} | ${k.scope} | ${k.revoked?'已吊销':'有效'} | ${k.note||'无备注'}`).join('\n')||'当前没有 APP Key。';
+      case 'list_skills': return (r||[]).map(s=>`${s.name} | ${s.description||''} | 来源 ${s.origin||'-'}`).join('\n')||'当前没有技能。';
+      case 'get_skill': return `【${r.name}】${r.description||''}\n\n${r.content||''}`;
+      case 'create_key': return `已生成 Key（${r.scope}）：${r.key}\n请立即保存，之后不再显示。id=${r.id}`;
+      case 'create_skill': return `已创建技能「${r.name}」(id=${r.id})。`;
+      case 'update_skill': return `技能已更新（${r.updated} 个字段）。`;
+      case 'delete_skill': return '技能已删除。';
+      case 'get_ai_config': return `当前模型：${r.model}\n接口：${r.base_url}\n上下文预算：${r.context_max}\n密钥：${r.api_key_masked||'未设置'}\n配置来源：${r.source}`;
+      case 'set_ai_config': return '模型配置已更新：'+JSON.stringify(r);
+      case 'test_ai': return `连接${r.ok?'成功':'失败'}（${r.ms||''}ms）：${r.reply||r.error||''}`;
+      case 'list_prompts': return Object.keys(r).map(k=>`${k}: ${r[k].custom?'已自定义':'默认'}`).join('\n');
+      case 'get_prompt': return `【${r.key}】\n${r.content}`;
+      case 'set_prompt': return `提示词「${r.key}」已保存，立即生效。`;
+      case 'reset_prompt': return `提示词已恢复：${r.reset}`;
+      case 'add_record': return `已新增记录（${r.record_id}）。`;
+      case 'update_record': return `已更新 ${r.updated} 个字段（${r.record_id}）。`;
+      case 'delete_record': return `记录已删除，可用撤销恢复。`;
+      case 'start_day': return `今日关键 3 件：\n`+(r.关键3件||[]).map((x,i)=>`${i+1}. [${x.优先级}] ${x.任务} (${x.分数}分)`).join('\n')+`\n未完成 ${r.未完成}，逾期 ${r.逾期}`;
+      case 'review_day': return `复盘：${r.一句话||''}`;
+      case 'search_history': return r.数据||'未命中记录。';
+      default: return JSON.stringify(r).slice(0,1500);
+    }
+  }catch(e){ return JSON.stringify(r).slice(0,1500); }
+}
+
 async function executeTool(name, args){
   const a=args||{};
   switch(name){
@@ -1217,7 +1256,7 @@ async function handle(req,res){
         try{
           const result=await executeTool(tc.tool,tc.args||{});
           data={tool:tc.tool,result};
-          reply='已执行 '+tc.tool+'：'+String(JSON.stringify(result)).slice(0,600);
+          reply=formatToolResult(tc.tool,result);
           return json(res,200,{ok:true,intent:'tool',confidence:conf,reply,data,audit_ids:result.audit_id?[result.audit_id]:[],undoable:!!result.audit_id});
         }catch(e){ reply='工具执行失败：'+String(e.message||e).slice(0,150); return json(res,200,{ok:false,intent:'tool',reply,data:{}}); }
       }
@@ -1259,10 +1298,8 @@ async function handle(req,res){
       try{
         const result=await executeTool(tc.tool,tc.args||{});
         data={tool:tc.tool,result};
-        // 让 LLM 按主提示词把结果自然表述
-        const scratch=String(JSON.stringify(result)).slice(0,4000);
-        reply=(await renderWithSkill('qa',{__raw:message},{工具:tc.tool,执行结果:scratch},'')) ||
-          ('已执行 '+tc.tool+'：'+scratch.slice(0,300));
+        // 工具结果直接格式化为可读文本，禁止 LLM 重写（否则会忽略事实自由发挥）
+        reply=formatToolResult(tc.tool,result);
         return json(res,200,{ok:true,intent:'tool',confidence:conf,reply,data,audit_ids:result.audit_id?[result.audit_id]:[],undoable:!!result.audit_id});
       }catch(e){
         return json(res,200,{ok:false,intent:'tool',reply:'工具执行失败：'+String(e.message||e).slice(0,150)});
