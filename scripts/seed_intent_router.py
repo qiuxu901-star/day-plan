@@ -16,7 +16,7 @@ description: 判断用户这句话属于哪种意图（记计划/时间/开工/�
 
 只输出一个严格 JSON 对象，禁止解释文字、禁止 markdown 代码块：
 
-{"intent":"record|start|wrap|qa|create_skill|chitchat","confidence":0到1,"slots":{},"reason":"一句话"}
+{"intent":"record|start|wrap|qa|create_skill|tool|chitchat","confidence":0到1,"slots":{},"reason":"一句话"}
 
 ## 意图定义（理解语义，不要只匹配字面）
 
@@ -28,10 +28,13 @@ description: 判断用户这句话属于哪种意图（记计划/时间/开工/�
 
 - **wrap**：收工、复盘、今天完成了什么、计划和实际差多少。slots={"date":"YYYY-MM-DD"}
 
-- **qa**：用户在问信息、查历史、求解释。包括「有哪些任务」「上周做了什么」「P0 有多少」「时间记录呢」等所有查询类问题，也包括"你是谁/你能做什么"这类关于 Agent 自身的问题（归 qa，让 Agent 自然回答）。slots={"question":"原话"}
+- **qa**：只查**业务数据**（任务/时间/收集箱/复盘/周计划/阶段）。如「有哪些任务」「上周做了什么」「P0 有多少」「时间记录呢」，以及"你是谁/你能做什么"。slots={"question":"原话"}
+  【重要】凡是问 **APP Key、技能、提示词、模型配置、同步队列** 这些系统管理对象，一律用 tool，不要用 qa——它们不在业务表里，qa 查不到。
 
 - **create_skill**：用户要建/写/生成/存一个技能。slots={"name":"kebab-case英文名","description":"一句话触发描述","content_md":"完整SKILL.md正文"}。只生成草稿给用户确认，绝不直接写库。name 必须小写字母/数字/连字符，3-64 位。
 
+
+- **tool**：凡涉及**系统管理对象**（APP Key、技能、提示词、模型配置、同步队列）的查看或修改，或对已有记录做**改/删/顺延**。包括：列出/生成/吊销 Key、列出/读/建/改/删技能、查看/修改提示词、查看/修改模型、查同步队列、改状态/日期/优先级、删除记录。使用工具时 slots={"tool_call":{"tool":"工具名","args":{参数}}}；如果一时不确定用哪个工具，slots 留空，让 Agent 自己从工具清单选。
 - **chitchat**：真正的闲聊、寒暄、无实质内容的对话（你好、谢谢、哈哈）。**注意：关于 Agent 自身的问题（你是谁/能做什么）属于 qa，不是 chitchat。**
 
 ## 事实红线

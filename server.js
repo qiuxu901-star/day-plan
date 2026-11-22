@@ -220,6 +220,196 @@ function maskKey(k){
   if(k.length<=10) return k.slice(0,2)+'…'+k.slice(-2);
   return k.slice(0,6)+'…'+k.slice(-4);
 }
+// ===== Agent 全权限工具层 =====
+// 设计：LLM 只负责选工具+填参数；所有参数校验、字段白名单、写库、审计都在代码里。
+const AGENT_TOOLS = [
+  // 8 张业务表：查询与 CRUD
+  {name:'list_records', desc:'查询任意业务表的记录。可按字段过滤、排序、分页。', params:{table:'task|time|inbox|review|week|milestone|log|subtask', filters:'对象{字段名:值}', limit:'数字,默认50', sort:'字段名'}},
+  {name:'add_record', desc:'新增一条业务记录（任务/时间/收集箱/复盘/周计划/阶段等）。', params:{table:'表名', fields:'对象{中文字段名:值}'}},
+  {name:'update_record', desc:'按 record_id 修改一条业务记录的字段（改状态/改日期/改优先级等）。', params:{table:'表名', record_id:'记录ID', fields:'对象{字段名:值}'}},
+  {name:'delete_record', desc:'删除一条业务记录。不可撤销的删除不会自动执行——需用户确认。', params:{table:'表名', record_id:'记录ID'}},
+  // 快捷业务动作
+  {name:'start_day', desc:'开工：返回 TOP3 与盘面。', params:{}},
+  {name:'review_day', desc:'收工复盘：返回对账与时间分布。', params:{}},
+  {name:'search_history', desc:'自然语言查历史：自动解析日期/关键词/类型。', params:{question:'用户原话'}},
+  // 系统管理
+  {name:'list_keys', desc:'列出 APP Key（id/权限/备注/状态）。', params:{}},
+  {name:'create_key', desc:'生成 APP Key。明文只返回一次。', params:{scope:'read|write', note:'用途'}},
+  {name:'revoke_key', desc:'吊销 APP Key。', params:{id:'Key ID'}},
+  {name:'list_skills', desc:'列出所有技能（名称/描述/来源）。', params:{}},
+  {name:'get_skill', desc:'读取某个技能的完整正文。', params:{name:'技能名'}},
+  {name:'create_skill', desc:'新建技能（SKILL.md 格式）。', params:{name:'kebab-case', description:'触发描述', content:'SKILL.md正文'}},
+  {name:'update_skill', desc:'修改技能的名称/描述/正文。', params:{name:'技能名', fields:'对象{name|description|content:值}'}},
+  {name:'delete_skill', desc:'删除技能。', params:{name:'技能名'}},
+  {name:'list_prompts', desc:'列出所有提示词及是否自定义。', params:{}},
+  {name:'get_prompt', desc:'读取某段提示词全文。', params:{key:'intent|system|qa|strategic|coach|generator'}},
+  {name:'set_prompt', desc:'修改某段提示词，保存即生效。', params:{key:'提示词key', content:'新内容'}},
+  {name:'reset_prompt', desc:'恢复某段提示词为默认。', params:{key:'intent|qa|all'}},
+  {name:'get_ai_config', desc:'查看当前大模型配置（密钥脱敏）。', params:{}},
+  {name:'set_ai_config', desc:'修改大模型端点/模型名/上下文预算。', params:{base_url:'接口地址', model:'模型名', context_max:'字符数'}},
+  {name:'test_ai', desc:'测试大模型连通性。', params:{}},
+  {name:'sync_status', desc:'查看同步队列待处理条数。', params:{}},
+];
+const TOOL_NAMES = AGENT_TOOLS.map(t=>t.name);
+const TOOL_TABLES = TABLES;
+
+function toolAudit(action, detail){
+  audit('agent-tool',action,'agent_tool','',JSON.stringify(detail||{}).slice(0,800));
+  return db.prepare('SELECT last_insert_rowid() id').get().id;
+}
+async function executeTool(name, args){
+  const a=args||{};
+  switch(name){
+    case 'list_records': {
+      const t=String(a.table||'task');
+      if(!TOOL_TABLES.includes(t)) throw new Error('表名必须是: '+TOOL_TABLES.join(','));
+      const limit=Math.min(Math.max(parseInt(a.limit,10)||50,1),500);
+      const filters=(a.filters&&typeof a.filters==='object')?a.filters:null;
+      const r=listRecords(t,{page:1,size:limit,filters,sort:a.sort});
+      return {table:t,total:r.total,items:r.items.slice(0,limit)};
+    }
+    case 'add_record': {
+      const t=String(a.table||'');
+      if(!TOOL_TABLES.includes(t)) throw new Error('表名不合法');
+      if(!a.fields||typeof a.fields!=='object'||!Object.keys(a.fields).length) throw new Error('缺少 fields');
+      const r=addRecord(t,a.fields,'agent-tool');
+      const aid=toolAudit('add_record',{table:t,fields:a.fields,created:[{table:t,record_id:r.record_id}]});
+      return {ok:true,record_id:r.record_id,audit_id:aid};
+    }
+    case 'update_record': {
+      const t=String(a.table||'');
+      if(!TOOL_TABLES.includes(t)) throw new Error('表名不合法');
+      if(!a.record_id) throw new Error('缺少 record_id');
+      if(!a.fields||typeof a.fields!=='object') throw new Error('缺少 fields');
+      const r=updateRecord(t,a.record_id,a.fields,'agent-tool');
+      if(!r) throw new Error('记录不存在');
+      const aid=toolAudit('update_record',{table:t,record_id:a.record_id,fields:a.fields});
+      return {ok:true,record_id:a.record_id,updated:r.updated,audit_id:aid};
+    }
+    case 'delete_record': {
+      const t=String(a.table||'');
+      if(!TOOL_TABLES.includes(t)) throw new Error('表名不合法');
+      if(!a.record_id) throw new Error('缺少 record_id');
+      const before=db.prepare(`SELECT * FROM ${q(t)} WHERE record_id=?`).get(a.record_id);
+      if(!before) throw new Error('记录不存在');
+      const r=deleteRecord(t,a.record_id,'agent-tool');
+      const aid=toolAudit('delete_record',{table:t,record_id:a.record_id,before,restorable:true});
+      return {ok:true,deleted:1,audit_id:aid,note:'可用撤销恢复'};
+    }
+    case 'start_day': { const t=computeTop3(); return {关键3件:t.关键3件,未完成:t.未完成总数,逾期:t.逾期数}; }
+    case 'review_day': { return computeReview(); }
+    case 'search_history': {
+      const r=historySearch(String(a.question||''));
+      return r?{条件:r.params,命中:r.found,数据:r.text.slice(0,6000)}:{未命中:true};
+    }
+    case 'list_keys':
+      return db.prepare('SELECT id,scope,revoked,note,created_at FROM api_key ORDER BY created_at DESC').all();
+    case 'create_key': {
+      const k=createApiKey(a.scope==='write'?'write':'read',String(a.note||''));
+      const kaid=toolAudit('create_key',{id:k.id,scope:k.scope});
+      return Object.assign({},k,{audit_id:kaid});
+    }
+    case 'revoke_key': {
+      if(!a.id) throw new Error('缺少 id');
+      const r=db.prepare('UPDATE api_key SET revoked=1 WHERE id=?').run(a.id);
+      if(!r.changes) throw new Error('Key 不存在');
+      toolAudit('revoke_key',{id:a.id});
+      return {ok:true,revoked:1};
+    }
+    case 'list_skills':
+      return db.prepare('SELECT id,name,description,origin,status,updated_at FROM skills ORDER BY name').all();
+    case 'get_skill': {
+      const r=db.prepare('SELECT name,description,content FROM skills WHERE name=?').get(String(a.name||''));
+      if(!r) throw new Error('技能不存在');
+      return r;
+    }
+    case 'create_skill': {
+      const name=String(a.name||'').toLowerCase().trim();
+      if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)||name.length<3||name.length>64) throw new Error('技能名不合法');
+      if(db.prepare('SELECT 1 FROM skills WHERE name=?').get(name)) throw new Error('同名技能已存在');
+      const content=String(a.content||'');
+      if(!content) throw new Error('缺少正文');
+      const id='s_'+crypto.randomBytes(8).toString('hex');
+      db.prepare('INSERT INTO skills (id,name,description,content,status,source_sha,origin,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+        .run(id,name,String(a.description||''),content,'active',crypto.createHash('sha256').update(content).digest('hex'),'agent',now(),now());
+      const aid=toolAudit('create_skill',{id,name,created:[{table:'skills',record_id:id}]});
+      return {ok:true,id,name,audit_id:aid};
+    }
+    case 'update_skill': {
+      if(!a.name) throw new Error('缺少 name');
+      const cur=db.prepare('SELECT * FROM skills WHERE name=?').get(a.name);
+      if(!cur) throw new Error('技能不存在');
+      const fields=a.fields||{};
+      const allowed=['name','description','content'];
+      const sets=[],vals=[];
+      allowed.forEach(k=>{ if(fields[k]!==undefined){ sets.push(k+'=?'); vals.push(String(fields[k])); } });
+      if(!sets.length) throw new Error('没有可更新字段');
+      if(fields.content) sets.push("source_sha=?"),vals.push(crypto.createHash('sha256').update(String(fields.content)).digest('hex'));
+      db.prepare(`UPDATE skills SET ${sets.join(',')},updated_at=? WHERE name=?`).run(...vals,now(),a.name);
+      toolAudit('update_skill',{name:a.name,fields});
+      return {ok:true,updated:sets.length};
+    }
+    case 'delete_skill': {
+      if(!a.name) throw new Error('缺少 name');
+      const r=db.prepare('DELETE FROM skills WHERE name=?').run(a.name);
+      if(!r.changes) throw new Error('技能不存在');
+      toolAudit('delete_skill',{name:a.name});
+      return {ok:true,deleted:1};
+    }
+    case 'list_prompts': {
+      const out={}; PROMPT_KEYS.forEach(k=>{ const r=db.prepare('SELECT content,updated_at FROM prompts WHERE key=?').get(k);
+        out[k]={custom:!!r, updated_at:r?r.updated_at:''}; }); return out;
+    }
+    case 'get_prompt': {
+      const k=String(a.key||'');
+      if(!PROMPT_KEYS.includes(k)) throw new Error('未知提示词');
+      const cur=getPrompts(); return {key:k,content:cur[k]||''};
+    }
+    case 'set_prompt': {
+      const k=String(a.key||'');
+      if(!PROMPT_KEYS.includes(k)) throw new Error('未知提示词');
+      const v=String(a.content||''); if(!v.trim()) throw new Error('内容不能为空');
+      const prev=db.prepare('SELECT content FROM prompts WHERE key=?').get(k);
+      db.prepare('INSERT OR REPLACE INTO prompts (key,content,updated_at) VALUES (?,?,?)').run(k,v,now());
+      const paid=toolAudit('set_prompt',{key:k,prev_content:prev?prev.content:null,length:v.length});
+      return {ok:true,key:k,saved:true,audit_id:paid};
+    }
+    case 'reset_prompt': {
+      const k=String(a.key||'all');
+      if(k==='all') db.prepare("DELETE FROM prompts WHERE key IN ('intent','qa')").run();
+      else if(k==='intent'||k==='qa') db.prepare('DELETE FROM prompts WHERE key=?').run(k);
+      else throw new Error('只能恢复 intent/qa/all');
+      toolAudit('reset_prompt',{key:k}); return {ok:true,reset:k};
+    }
+    case 'get_ai_config': { const c=getAIConfig(); return {base_url:c.base_url,model:c.model,context_max:c.context_max,api_key_masked:maskKey(c.api_key),source:c.source}; }
+    case 'set_ai_config': {
+      const b={};
+      if(a.base_url) b.base_url=String(a.base_url).trim().replace(/\/+$/,'');
+      if(a.model) b.model=String(a.model).trim();
+      if(a.context_max) b.context_max=parseInt(a.context_max,10);
+      if(!Object.keys(b).length) throw new Error('没有可更新字段');
+      const cur=getAIConfig();
+      db.prepare('INSERT OR REPLACE INTO ai_config (id,base_url,api_key,model,context_max,updated_at) VALUES (1,?,?,?,?,?)')
+        .run(b.base_url||cur.base_url,cur.api_key,b.model||cur.model,b.context_max||cur.context_max,now());
+      toolAudit('set_ai_config',b); return {ok:true,...b};
+    }
+    case 'test_ai': {
+      const c=getAIConfig();
+      const r=await fetch(c.base_url.replace(/\/+$/,'')+'/chat/completions',{
+        method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.api_key},
+        body:JSON.stringify({model:c.model,messages:[{role:'user',content:'只回复两个字：正常'}]}),
+        signal:AbortSignal.timeout(20000)});
+      const d=await r.json();
+      return {ok:r.ok,status:r.status,reply:(d.choices?.[0]?.message?.content||'').slice(0,50)};
+    }
+    case 'sync_status': {
+      const rows=db.prepare("SELECT table_name,op,count(*) n FROM sync_queue WHERE status='pending' GROUP BY table_name,op").all();
+      return {pending:rows.reduce((s,r)=>s+r.n,0),by_table:rows};
+    }
+    default: throw new Error('未知工具: '+name);
+  }
+}
+
 // ===== 历史查询：按日期/关键词/类型定向检索 =====
 function parseHistoryQuery(question){
   const t=String(question||'');
@@ -343,7 +533,7 @@ const FIELD_ALIAS={title:'任务名称',name:'任务名称',task:'任务名称',
 const STATUS_ENUM = ['待办','进行中','已完成'];
 const PRIORITY_ENUM = ['P0','P1','P2'];
 const DEFAULT_INTENT = `你是"潮汐"工作台的意图分类器。只输出一个严格 JSON 对象，禁止解释文字、禁止 markdown 代码块。
-输出格式：{"intent":"record|start|wrap|qa|create_skill|chitchat","confidence":0到1,"slots":{},"reason":"一句话"}
+输出格式：{"intent":"record|start|wrap|qa|create_skill|tool|chitchat","confidence":0到1,"slots":{},"reason":"一句话"}
 意图定义：
 - record：用户口述要新增/修改任务、时间记录、复盘、收集箱。slots={"target":"task|time|inbox|review","items":[{"中文字段名":"值"}]}。
   【硬性要求】① 每条记录只用一个 item 对象，把这句话的所有信息都放进这一个对象，禁止拆成多个 item（例如 title/date/time/person 必须合到同一个 item）。② 字段名必须用中文白名单，task 用：任务名称/状态/优先级/到期日/计划日/备注/事项类型/负责人/事项二；time 用：事项/日期/时长/分类/开始时间/结束时间；inbox 用：内容/类型/标签/来源/记录日期。绝不用 title/date/time/person 等英文键。③ "今天/明天"原样填入对应日期字段，交给代码换算。④ 一句话通常只产生一条 item。
@@ -490,6 +680,7 @@ function classifyByKeyword(text){
   if(/收工|复盘|今天完成|今天做了/i.test(t)) return {intent:'wrap',confidence:0.9,slots:{},reason:'关键词'};
   if(/记一?下|加个?任务|今天的?计划是|新增|记录一下/.test(t)) return {intent:'record',confidence:0.8,slots:{target:'task',items:[{'任务名称':t.replace(/^(记一下|记录一下|加个任务|今天的计划是|新增)/,'').replace(/^[：:，,\s]+/,'').trim()}]},reason:'关键词'};
   if(/建(个|一个)?技能|生成技能|写成技能|存成技能|做个技能/i.test(t)) return {intent:'create_skill',confidence:0.75,slots:{},reason:'关键词'};
+  if(/帮我改|帮我删|新建.*技能|改.*提示词|查.*队列|生成.*key|吊销|新增.*周计划|标记.*完成/.test(t)) return {intent:'tool',confidence:0.7,slots:{},reason:'关键词'};
   if(/有哪些事|什么状态|几?条任务|查一下|现在怎么样/.test(t)) return {intent:'qa',confidence:0.8,slots:{question:t},reason:'关键词'};
   return {intent:'chitchat',confidence:0.5,slots:{},reason:'无法识别'};
 }
@@ -543,7 +734,7 @@ async function classifyIntent(message, history){
     const d=await r.json();
     const raw=(d.choices?.[0]?.message?.content||'').replace(/```json|```/g,'').trim();
     const obj=JSON.parse(raw);
-    if(!obj.intent || !['record','start','wrap','qa','create_skill','chitchat'].includes(obj.intent)) throw new Error('bad intent');
+    if(!obj.intent || !['record','start','wrap','qa','create_skill','tool','chitchat'].includes(obj.intent)) throw new Error('bad intent');
     return obj;
   }catch(e){
     // 超时/解析失败不要静默降级为关键词（会误判成 chitchat 显得死板）
@@ -961,7 +1152,9 @@ async function handle(req,res){
     const message=String(b.message||'').trim();
     if(!message) return json(res,400,{detail:'消息不能为空'});
     let intent;
-    if(b.preset_intent && ['record','start','wrap','qa'].includes(b.preset_intent)){
+    if(b.preset_intent==='tool' && b.slots && b.slots.tool_call && b.slots.tool_call.tool){
+      intent={intent:'tool',confidence:1,slots:b.slots,reason:'指定工具'};
+    } else if(b.preset_intent && ['record','start','wrap','qa'].includes(b.preset_intent)){
       // 快捷指令：跳过 LLM，纯确定性
       intent={intent:b.preset_intent,confidence:1,slots:b.slots||{},reason:'快捷指令'};
       if(b.preset_intent==='record'){
@@ -1005,6 +1198,30 @@ async function handle(req,res){
       const fallback=rv.一句话+'\n完成：'+(rv.今日完成.join('、')||'无')+'。';
       const rendered=await renderWithSkill('wrap',{__raw:message},rv,fallback);
       reply=rendered||fallback;
+    } else if(intent.intent==='qa' && /APP.?Key|密钥|技能|提示词|模型配置|什么模型|哪个模型|模型名|同步队列|待同步|吊销|生成.{0,4}key/i.test(message)){
+      // 保险：系统管理对象不在业务表里，qa 查不到 → 强制走工具
+      intent=Object.assign({},intent,{intent:'tool',slots:{tool_call:{tool:'',args:{}}},reason:'qa转tool'});
+      let tc=intent.slots.tool_call;
+      const cfg=getAIConfig();
+      const sys='从工具清单选一个最合适的工具完成请求，只输出严格JSON：{"tool":"工具名","args":{参数}}，不要解释。\n'+
+        AGENT_TOOLS.map(t=>'- '+t.name+': '+t.desc+' | '+JSON.stringify(t.params)).join('\n')+'\n请求：'+message;
+      try{
+        const r=await fetch(cfg.base_url.replace(/\/+$/,'')+'/chat/completions',{
+          method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.api_key},
+          body:JSON.stringify({model:cfg.model,response_format:{type:'json_object'},messages:[{role:'system',content:sys},{role:'user',content:message}]}),
+          signal:AbortSignal.timeout(25000)});
+        const d=await r.json();
+        tc=JSON.parse((d.choices?.[0]?.message?.content||'').replace(/```json|```/g,'').trim());
+      }catch(e){}
+      if(tc && TOOL_NAMES.includes(tc.tool)){
+        try{
+          const result=await executeTool(tc.tool,tc.args||{});
+          data={tool:tc.tool,result};
+          reply='已执行 '+tc.tool+'：'+String(JSON.stringify(result)).slice(0,600);
+          return json(res,200,{ok:true,intent:'tool',confidence:conf,reply,data,audit_ids:result.audit_id?[result.audit_id]:[],undoable:!!result.audit_id});
+        }catch(e){ reply='工具执行失败：'+String(e.message||e).slice(0,150); return json(res,200,{ok:false,intent:'tool',reply,data:{}}); }
+      }
+      reply='没找到合适的工具，能说具体点吗？'; return json(res,200,{ok:false,intent:'tool',reply,data:{}});
     } else if(intent.intent==='qa'){
       // 意图识别超时降级：直接自由回复，不再叠加大上下文查询（避免二次超时）
       if(intent.degraded){
@@ -1017,6 +1234,35 @@ async function handle(req,res){
         const d=await resp.json();
         reply=d.choices?.[0]?.message?.content||'（无返回）';
         data.answer=reply;
+      }
+    } else if(intent.intent==='tool'){
+      // 全权限工具调用：LLM 选工具+参数，代码严格校验执行
+      let tc=intent.slots&&intent.slots.tool_call;
+      if(!tc){
+        const cfg=getAIConfig();
+        const sys='你是潮汐工作台的 Agent。从工具清单里选一个最合适的工具完成用户请求，只输出严格 JSON：{"tool":"工具名","args":{参数}}，不要解释文字。\n可用工具（名称:说明 参数）:\n'+
+          AGENT_TOOLS.map(t=>'- '+t.name+': '+t.desc+' | 参数 '+JSON.stringify(t.params)).join('\n')+
+          '\n用户当前请求：'+message;
+        try{
+          const r=await fetch(cfg.base_url.replace(/\/+$/,'')+'/chat/completions',{
+            method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.api_key},
+            body:JSON.stringify({model:cfg.model,response_format:{type:'json_object'},messages:[{role:'system',content:sys},{role:'user',content:message}]}),
+            signal:AbortSignal.timeout(25000)});
+          const d=await r.json();
+          tc=JSON.parse((d.choices?.[0]?.message?.content||'').replace(/```json|```/g,'').trim());
+        }catch(e){ return json(res,200,{ok:false,intent:'tool',reply:'工具选择失败，请再说一次具体要做什么。'}); }
+      }
+      if(!tc || !TOOL_NAMES.includes(tc.tool)) return json(res,200,{ok:false,intent:'tool',reply:'没找到合适的工具，能说具体点吗？'});
+      try{
+        const result=await executeTool(tc.tool,tc.args||{});
+        data={tool:tc.tool,result};
+        // 让 LLM 按主提示词把结果自然表述
+        const scratch=String(JSON.stringify(result)).slice(0,4000);
+        reply=(await renderWithSkill('qa',{__raw:message},{工具:tc.tool,执行结果:scratch},'')) ||
+          ('已执行 '+tc.tool+'：'+scratch.slice(0,300));
+        return json(res,200,{ok:true,intent:'tool',confidence:conf,reply,data,audit_ids:result.audit_id?[result.audit_id]:[],undoable:!!result.audit_id});
+      }catch(e){
+        return json(res,200,{ok:false,intent:'tool',reply:'工具执行失败：'+String(e.message||e).slice(0,150)});
       }
     } else if(intent.intent==='create_skill'){
       return json(res,200,agentCreateSkill(intent.slots));
@@ -1034,11 +1280,30 @@ async function handle(req,res){
     let det; try{ det=JSON.parse(row.detail); }catch(e){ return json(res,400,{detail:'操作记录格式错误'}); }
     if(det.undone) return json(res,200,{ok:true,undone:0,note:'已撤销过'});
     let n=0;
+    // 撤销新增：删除创建的记录
     (det.created||[]).forEach(c=>{
       if(c.table==='skills'){
         if(db.prepare('DELETE FROM skills WHERE id=?').run(c.record_id).changes) n++;
-      } else if(deleteRecord(c.table,c.record_id,'agent')) n++;
+      } else if(TOOL_TABLES.includes(c.table) && deleteRecord(c.table,c.record_id,'agent',false)) n++;
     });
+    // 撤销删除：恢复原记录（工具层 delete_record 记录 before 快照）
+    if(det.before && TOOL_TABLES.includes(det.table) && det.record_id){
+      const b=det.before, cs=cols(det.table);
+      const ks=Object.keys(b).filter(k=>cs.includes(k));
+      db.prepare(`INSERT OR REPLACE INTO ${q(det.table)} (${ks.map(q).join(',')}) VALUES (${ks.map(()=>'?').join(',')})`)
+        .run(...ks.map(k=>b[k]));
+      n++;
+    }
+    // 撤销提示词修改：恢复修改前内容
+    if(det.key && det.prev_content!==undefined){
+      if(det.prev_content===null) db.prepare('DELETE FROM prompts WHERE key=?').run(det.key);
+      else db.prepare('INSERT OR REPLACE INTO prompts (key,content,updated_at) VALUES (?,?,?)').run(det.key,det.prev_content,now());
+      n++;
+    }
+    // 撤销 Key 生成
+    if(det.id && String(det.id).startsWith('k_')){
+      if(db.prepare('UPDATE api_key SET revoked=1 WHERE id=?').run(det.id).changes) n++;
+    }
     db.prepare('UPDATE audit_log SET detail=? WHERE id=?').run(JSON.stringify(Object.assign(det,{undone:1})),aid);
     return json(res,200,{ok:true,undone:n});
   }

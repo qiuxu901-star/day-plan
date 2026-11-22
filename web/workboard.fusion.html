@@ -787,6 +787,10 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .agent-bubble p{margin:3px 0}
   .agent-bubble p:empty{margin:0}
   .agent-bubble code{background:var(--paper);padding:1px 4px;border-radius:4px;font-family:ui-monospace,monospace;font-size:11px}
+  .agent-bubble .tool-trace{margin-top:9px;padding-top:8px;border-top:1px dashed var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .tool-trace .tt-label{font-size:11px;color:var(--muted)}
+  .tool-trace .tt-undo{padding:3px 10px;border:1px solid var(--terra);border-radius:7px;background:transparent;color:var(--terra);font-size:11px;cursor:pointer}
+  .tool-trace .tt-undo:disabled{opacity:.5;cursor:default}
 </style>
 </head>
 <body data-page-node-id="hwziI2PCj4FjvP8nQPS6mO">
@@ -3765,6 +3769,13 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
       d.appendChild(b);
     }
     var emp=$('agentEmpty'); if(emp) emp.style.display='none';
+    var tu=d.querySelector('.tt-undo');
+    if(tu) tu.onclick=function(){
+      tu.disabled=true;
+      wbApi('/agent/undo',{method:'POST',body:JSON.stringify({audit_id:tu.getAttribute('data-audit')})})
+        .then(function(){ tu.textContent='已撤销'; if(typeof refreshAll==='function') refreshAll(); })
+        .catch(function(e){ tu.disabled=false; toast(e.message,true); });
+    };
     box.appendChild(d); box.scrollTop=box.scrollHeight;
   }
   function agentTyping(on){
@@ -3817,6 +3828,13 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
           return;
         }
         var html=mdToHtml(r.reply||'');
+        if(r.data && r.data.tool){
+          html+='<div class="tool-trace"><span class="tt-label">⚙ 已调用 '+escHtml(r.data.tool)+'</span>';
+          if(r.undoable && r.audit_ids && r.audit_ids.length){
+            html+='<button class="tt-undo" data-audit="'+escHtml(r.audit_ids[0])+'">撤销</button>';
+          }
+          html+='</div>';
+        }
         if(r.data && r.data.top3 && r.data.top3.length){
           html+='<div class="agent-top3">'+r.data.top3.map(function(t){
             return '<span>'+escHtml('['+(t.优先级||'')+'] '+t.任务+' · '+t.分数+'分')+'</span>';
