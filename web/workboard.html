@@ -3879,7 +3879,21 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
     agentState.history.push({role:'me',text:text});
     var body={message:text,history:agentState.history};
     if(preset) body.preset_intent=preset;
-    return wbApi('/agent/chat',{method:'POST',body:JSON.stringify(body)})
+    // Agent 对话偶发网络中断：超时 + 自动重试一次
+    function doChat(){
+      var ctl = (typeof AbortController!=='undefined') ? new AbortController() : null;
+      var timer = ctl ? setTimeout(function(){ ctl.abort(); }, 60000) : null;
+      var opts={method:'POST',body:JSON.stringify(body)};
+      if(ctl) opts.signal=ctl.signal;
+      return wbApi('/agent/chat',opts).finally(function(){ if(timer) clearTimeout(timer); });
+    }
+    return doChat().catch(function(e){
+      if(String(e&&e.message||'').indexOf('Failed to fetch')>=0 || /abort/i.test(String(e&&e.message||''))){
+        // 第一次失败多为瞬时网络抖动，重试一次
+        return doChat();
+      }
+      throw e;
+    })
       .then(function(r){
         agentTyping(false);
         if(r.need_confirm && r.intent==='create_skill' && r.preview){
@@ -3899,7 +3913,7 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
       })
       .catch(function(e){
         agentTyping(false);
-        agentBubble('ai','出错了：'+escHtml(e.message)+'，请重试。');
+        agentBubble('ai','连接中断了（'+escHtml(e.message)+'）。我已重试过，如果还不行请再发一次，或检查网络。');
       })
       .finally(function(){
         agentState.busy=false;

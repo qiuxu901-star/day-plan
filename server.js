@@ -538,7 +538,7 @@ async function classifyIntent(message, history){
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.api_key},
       body:JSON.stringify({model:cfg.model,response_format:{type:'json_object'},messages}),
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(25000)
     });
     const d=await r.json();
     const raw=(d.choices?.[0]?.message?.content||'').replace(/```json|```/g,'').trim();
@@ -546,7 +546,9 @@ async function classifyIntent(message, history){
     if(!obj.intent || !['record','start','wrap','qa','create_skill','chitchat'].includes(obj.intent)) throw new Error('bad intent');
     return obj;
   }catch(e){
-    return classifyByKeyword(message);
+    // 超时/解析失败不要静默降级为关键词（会误判成 chitchat 显得死板）
+    // 交给调用方走自由回复，至少能自然接话
+    return {intent:'qa',confidence:0.5,slots:{question:message},reason:'识别降级',degraded:true};
   }
 }
 
@@ -1004,12 +1006,18 @@ async function handle(req,res){
       const rendered=await renderWithSkill('wrap',{__raw:message},rv,fallback);
       reply=rendered||fallback;
     } else if(intent.intent==='qa'){
-      if(!getAIConfig().base_url||!getAIConfig().api_key) return json(res,503,{detail:'AI 未配置'});
-      const sys=buildAgentSystem('qa',{__raw:message})+'\n\n'+getPrompts().qa;
-      const resp=await callAI([{role:'system',content:sys+'\n\n'+buildContext(message)},{role:'user',content:message}],false);
-      const d=await resp.json();
-      reply=d.choices?.[0]?.message?.content||'（无返回）';
-      data.answer=reply;
+      // 意图识别超时降级：直接自由回复，不再叠加大上下文查询（避免二次超时）
+      if(intent.degraded){
+        reply=(await freeReply(message,b.history)) || '我刚才没太理解你的意思，能再说具体一点吗？';
+        data.answer=reply; data.degraded=true;
+      } else {
+        if(!getAIConfig().base_url||!getAIConfig().api_key) return json(res,503,{detail:'AI 未配置'});
+        const sys=buildAgentSystem('qa',{__raw:message})+'\n\n'+getPrompts().qa;
+        const resp=await callAI([{role:'system',content:sys+'\n\n'+buildContext(message)},{role:'user',content:message}],false);
+        const d=await resp.json();
+        reply=d.choices?.[0]?.message?.content||'（无返回）';
+        data.answer=reply;
+      }
     } else if(intent.intent==='create_skill'){
       return json(res,200,agentCreateSkill(intent.slots));
     } else {
