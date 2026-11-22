@@ -226,6 +226,8 @@ const AGENT_TOOLS = [
   // 8 张业务表：查询与 CRUD
   {name:'list_records', desc:'查询任意业务表的记录。可按字段过滤、排序、分页。', params:{table:'task|time|inbox|review|week|milestone|log|subtask', filters:'对象{字段名:值}', limit:'数字,默认50', sort:'字段名'}},
   {name:'add_record', desc:'新增一条业务记录（任务/时间/收集箱/复盘/周计划/阶段等）。', params:{table:'表名', fields:'对象{中文字段名:值}'}},
+  {name:'mark_done', desc:'按任务名称（可以只说关键词）把某个任务标记为已完成。最常用：用户说"把XX标记为完成/标成已完成/做完XX了"。', params:{keyword:'任务名称或其中几个字'}},
+  {name:'find_task', desc:'按名称关键词找到任务并返回 record_id，用于后续修改。', params:{keyword:'任务名称关键词'}},
   {name:'update_record', desc:'按 record_id 修改一条业务记录的字段（改状态/改日期/改优先级等）。', params:{table:'表名', record_id:'记录ID', fields:'对象{字段名:值}'}},
   {name:'delete_record', desc:'删除一条业务记录。不可撤销的删除不会自动执行——需用户确认。', params:{table:'表名', record_id:'记录ID'}},
   // 快捷业务动作
@@ -285,6 +287,11 @@ function formatToolResult(tool, r){
       case 'get_prompt': return `【${r.key}】\n${r.content}`;
       case 'set_prompt': return `提示词「${r.key}」已保存，立即生效。`;
       case 'reset_prompt': return `提示词已恢复：${r.reset}`;
+      case 'mark_done':
+        if(r.need_choose) return '找到多条匹配，请说具体是哪一条：\n'+r.candidates.map((c,i)=>`${i+1}. ${c.任务名称}（${c.状态}）`).join('\n');
+        if(r.already_done) return `「${r.任务名称}」本来就是已完成。`;
+        return `✓ 已把「${r.任务名称}」标记为已完成（原状态：${r.old_status}）。可撤销。`;
+      case 'find_task': return (r.items||[]).map(x=>`${x.record_id} | ${x.任务名称} | ${x.状态}`).join('\n')||'没找到匹配的任务。';
       case 'add_record': return `已新增记录（${r.record_id}）。`;
       case 'update_record': return `已更新 ${r.updated} 个字段（${r.record_id}）。`;
       case 'delete_record': return `记录已删除，可用撤销恢复。`;
@@ -299,6 +306,11 @@ function formatToolResult(tool, r){
 // 确定性关键词路由：常见系统管理请求直接映射工具，不依赖 LLM 选择
 function toolByKeyword(text){
   const t=String(text||'');
+  // 标记完成优先（避免被通用"任务"关键词抢先匹配到 list_records）
+  if(/标记.*完成|标成.*完成|标为.*完成|设为.*完成|做完.*了|已完成.*吧|把.*完成/.test(t)){
+    let kw=t.replace(/^(把|请|帮|帮我|标记|标成|标为|设为|将)/g,'').replace(/(标记为|标成|标为|设为|已完成|完成|了|吧|这个|那条|这项)/g,'').trim();
+    if(kw) return {tool:'mark_done',args:{keyword:kw}};
+  }
   if(/APP.?Key|api.?key|密钥|key列表|有哪些key|生成.{0,4}key|吊销/i.test(t))
     return /生成|新建|创建/.test(t)?{tool:'create_key',args:{scope:/写|write/i.test(t)?'write':'read'}}
       :/吊销|删除|撤销/.test(t)?null:{tool:'list_keys',args:{}};
@@ -322,6 +334,36 @@ async function executeTool(name, args){
       const filters=(a.filters&&typeof a.filters==='object')?a.filters:null;
       const r=listRecords(t,{page:1,size:limit,filters,sort:a.sort});
       return {table:t,total:r.total,items:r.items.slice(0,limit)};
+    }
+    case 'mark_done': {
+      const kw=String(a.keyword||'').trim();
+      if(!kw) throw new Error('缺少任务名称');
+      // 按名称模糊匹配（去掉标点，取最长片段）
+      const clean=kw.replace(/[，。！？、：:「」「」\s]/g,' ').split(/\s+/).filter(x=>x.length>=2);
+      const term=clean.sort((x,y)=>y.length-x.length)[0]||kw;
+      let rows=[];
+      try{ rows=db.prepare(`SELECT record_id,任务名称,状态 FROM task WHERE 任务名称 LIKE ? LIMIT 20`).all('%'+term+'%'); }catch(e){}
+      if(!rows.length){
+        // 退而求其次：逐字包含
+        rows=db.prepare('SELECT record_id,任务名称,状态 FROM task').all().filter(r=>String(r['任务名称']||'').includes(term)).slice(0,20);
+      }
+      if(!rows.length) throw new Error('没找到名称含「'+term+'」的任务');
+      if(rows.length>1){
+        return {need_choose:true,candidates:rows.map(r=>({record_id:r.record_id,任务名称:r['任务名称'],状态:r['状态']})),
+          note:'找到多条，请用户指定是哪一条'};
+      }
+      const t=rows[0];
+      if(t['状态']==='已完成') return {ok:true,already_done:true,record_id:t.record_id,任务名称:t['任务名称']};
+      const r=updateRecord('task',t.record_id,{'状态':'已完成'},'agent-tool');
+      const aid=toolAudit('mark_done',{table:'task',record_id:t.record_id,任务名称:t['任务名称'],old_status:t['状态']});
+      return {ok:true,record_id:t.record_id,任务名称:t['任务名称'],old_status:t['状态'],new_status:'已完成',audit_id:aid};
+    }
+    case 'find_task': {
+      const kw=String(a.keyword||'').trim();
+      if(!kw) throw new Error('缺少关键词');
+      const rows=db.prepare('SELECT record_id,任务名称,状态,优先级,计划日 FROM task').all()
+        .filter(r=>String(r['任务名称']||'').includes(kw)).slice(0,20);
+      return {count:rows.length,items:rows};
     }
     case 'add_record': {
       const t=String(a.table||'');
@@ -1206,6 +1248,23 @@ async function handle(req,res){
     const b=await readBody(req);
     const message=String(b.message||'').trim();
     if(!message) return json(res,400,{detail:'消息不能为空'});
+    // 最高优先级：任何"标记完成"语义直接走 mark_done，绝不让 record/LLM 误判成新建
+    if(/标记.*完成|标成.*完成|标为.*完成|设为.*完成|置为.*完成|做完.*了|把.*完成|完成掉/.test(message)){
+      let kw=message.replace(/^(把|请|帮|帮我|将|标记|标成|标为|设为|置为)/g,'')
+        .replace(/(标记为|标成|标为|设为|置为|已完成|完成掉|完成)/g,'')
+        .replace(/[了吧]$/g,'')
+        .replace(/^(这条|那条|这个|这项|任务)/g,'')
+        .replace(/(这条|那条|这个|这项|任务)$/g,'').trim();
+      // 去掉书名号/括号包裹
+      kw=kw.replace(/^[【\[（(「]|[】\]）)」]$/g,'').trim();
+      try{
+        const mr=await executeTool('mark_done',{keyword:kw});
+        const tdata={tool:'mark_done',result:mr};
+        const treply=formatToolResult('mark_done',mr);
+        return json(res,200,{ok:true,intent:'tool',confidence:1,reply:treply,data:tdata,
+          audit_ids:mr.audit_id?[mr.audit_id]:[],undoable:!!mr.audit_id});
+      }catch(e){ return json(res,200,{ok:false,intent:'tool',reply:'标记完成失败：'+String(e.message||e).slice(0,150)}); }
+    }
     let intent;
     if(b.preset_intent==='tool' && b.slots && b.slots.tool_call && b.slots.tool_call.tool){
       intent={intent:'tool',confidence:1,slots:b.slots,reason:'指定工具'};
@@ -1345,6 +1404,11 @@ async function handle(req,res){
         if(db.prepare('DELETE FROM skills WHERE id=?').run(c.record_id).changes) n++;
       } else if(TOOL_TABLES.includes(c.table) && deleteRecord(c.table,c.record_id,'agent',false)) n++;
     });
+    // 撤销 mark_done：把状态恢复为原值
+    if(det.record_id && det.old_status && TOOL_TABLES.includes(det.table||'task')){
+      const tt=det.table||'task';
+      if(db.prepare(`UPDATE ${q(tt)} SET 状态=? WHERE record_id=?`).run(det.old_status,det.record_id).changes) n++;
+    }
     // 撤销删除：恢复原记录（工具层 delete_record 记录 before 快照）
     if(det.before && TOOL_TABLES.includes(det.table) && det.record_id){
       const b=det.before, cs=cols(det.table);
