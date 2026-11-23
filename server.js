@@ -614,7 +614,7 @@ function createApiKey(scope, note){
 // ---------- Agent 能力（意图识别由 LLM，确定性逻辑在代码） ----------
 function aiContextMax(){ return getAIConfig().context_max; }
 const FIELD_WHITELIST = {
-  task: ['任务名称','状态','优先级','到期日','备注','计划日','来源','时段','事项类型','周次','主线执行','负责人','事项二'],
+  task: ['任务名称','状态','优先级','到期日','备注','计划日','来源','时段','事项类型','周次','主线执行','负责人','事项二','计划时段','实际时段','开始时间','计划时间'],
   time: ['日期','事项','时长','分类','开始时间','结束时间','使用类型'],
   inbox: ['内容','类型','标签','来源','记录日期','状态'],
   review: ['日期','今日完成','卡点困难','明日计划','一句话总结','周次'],
@@ -629,12 +629,13 @@ const FIELD_ALIAS={title:'任务名称',name:'任务名称',task:'任务名称',
   '任务':'任务名称'};
 const STATUS_ENUM = ['待办','进行中','已完成'];
 const PRIORITY_ENUM = ['P0','P1','P2'];
-const DEFAULT_INTENT = `你是"潮汐"工作台的意图分类器。只输出一个严格 JSON 对象，禁止解释文字、禁止 markdown 代码块。
+const DEFAULT_INTENT = `你是「潮汐助理」的意图分类器。只输出一个严格 JSON 对象，禁止解释文字、禁止 markdown 代码块。
 输出格式：{"intent":"record|start|wrap|qa|create_skill|tool|chitchat","confidence":0到1,"slots":{},"reason":"一句话"}
 意图定义：
 - record：用户口述要新增/修改任务、时间记录、复盘、收集箱。slots={"target":"task|time|inbox|review","items":[{"中文字段名":"值"}]}。
-  【硬性要求】① 每条记录只用一个 item 对象，把这句话的所有信息都放进这一个对象，禁止拆成多个 item（例如 title/date/time/person 必须合到同一个 item）。② 字段名必须用中文白名单，task 用：任务名称/状态/优先级/到期日/计划日/备注/事项类型/负责人/事项二；time 用：事项/日期/时长/分类/开始时间/结束时间；inbox 用：内容/类型/标签/来源/记录日期。绝不用 title/date/time/person 等英文键。③ "今天/明天"原样填入对应日期字段，交给代码换算。④ 一句话通常只产生一条 item。
-- start：开工、今日计划、今天重点、TOP3、今天该做什么。slots={"date":"YYYY-MM-DD"}
+  【拆条规则·重要】① 一句话里若有多个时间段（如「1440-1500 做A，1500-1600 做B，1600-1700 做C」）或多个序号/分号并列的事项，必须拆成多个 item，每个时间段/序号一条，时间写进对应字段。② 单一事项只用一个 item，把该事项的所有信息（名称/时间/备注）放进同一个 item。③ 判断标准：有几件独立的事就几条 item；不要把多件时段不同的事压成一条。
+  【字段要求】中文白名单：task 用 任务名称/状态/优先级/到期日/计划日/备注/事项类型/负责人/事项二/计划时段/开始时间/计划时间/实际时段；time 用 事项/日期/时长/分类/开始时间/结束时间；inbox 用 内容/类型/标签/来源/记录日期。绝不用 title/date/time/person 等英文键。「1440」这类时间转 24 小时 HH:MM（1440→14:40）。"今天/明天"原样填入日期字段交给代码换算。
+- start：仅当用户想「查看」今天重点时用——开工、今天重点、TOP3、今天该做什么、现在最重要的事；或「今日计划？」这种询问。slots={"date":"YYYY-MM-DD"}。注意：「今日计划：+具体内容」是 record 不是 start。
 - wrap：收工、复盘、今天完成了什么、计划和实际差多少。slots={"date":"YYYY-MM-DD"}
 - qa：基于已有记录提问。slots={"question":"原话"}
 - create_skill：用户要「建/写/生成/存一个技能」。slots={"name":"kebab-case英文名","description":"一句话触发描述","content_md":"完整SKILL.md正文"}。只生成草稿给用户确认，绝不直接写库。name 必须小写字母/数字/连字符，3-64 位。
@@ -644,6 +645,15 @@ const DEFAULT_QA = '你是「潮汐」工作台助手。只使用提供的记录
 
 function dateToday(){ return new Date().toISOString().slice(0,10); }
 function dateTomorrow(){ const d=new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); }
+// 当前对话时间（本地时区），注入给 Agent 做时间判断：用户说的时间若已过，按"已结束"处理
+function nowContext(){
+  const d=new Date();
+  const p=n=>String(n).padStart(2,'0');
+  const day=['周日','周一','周二','周三','周四','周五','周六'][d.getDay()];
+  return '【当前对话时间】'+d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+
+    p(d.getHours())+':'+p(d.getMinutes())+' '+day+'。用户给出的时间点若早于此刻，视为已完成/已发生的时段；'+
+    '若晚于此刻，视为计划。不要臆造日期，年份用当前年份。';
+}
 
 // 复用原 /api/ai/actions/top3 的确定性打分
 function computeTop3(){
@@ -689,7 +699,11 @@ function agentRecord(slots){
   // LLM 有时把一句话拆成多个只含单字段的 item（title/date/time/person），先合并成一条
   const NAME_KEY={task:'任务名称',time:'事项',inbox:'内容',review:'日期'}[target]||'任务名称';
   const hasName=items.some(x=>x && Object.keys(x).some(k=>FIELD_ALIAS[k]===NAME_KEY || k===NAME_KEY));
-  if(!hasName && items.length>1){
+  // 多条且各自带时间字段 = 用户口述的多段计划，必须保留为多条（不能被合并逻辑压成一条）
+  const TIME_KEYS=['开始时间','计划时间','计划时段','结束时间','time','start','end'];
+  const multiSegment=items.length>1 && items.every(x=>x && typeof x==='object' &&
+    Object.keys(x).some(k=>TIME_KEYS.includes(k)||TIME_KEYS.includes(FIELD_ALIAS[k])));
+  if(!hasName && items.length>1 && !multiSegment){
     const merged={};
     items.forEach(x=>{ if(x && typeof x==='object') Object.assign(merged, x); });
     items=[merged];
@@ -698,9 +712,13 @@ function agentRecord(slots){
   items.forEach((item,i)=>{
     const clean={};
     Object.entries(item).forEach(([k0,v])=>{
-      const k=FIELD_ALIAS[k0]||k0;   // 英文键/别名 → 中文字段名
+      let k=FIELD_ALIAS[k0]||k0;   // 英文键/别名 → 中文字段名
+      // task 表没有「结束时间」字段：LLM 抽出的 end/结束时间 归到「计划时间」承载区间
+      if(target==='task' && (k==='结束时间'||k0==='end'||k0==='计划结束')) k='计划时间';
       if(!FIELD_WHITELIST[target].includes(k) || v===null || v===undefined) return;
       let val=String(v).trim();
+      // 任务表时间字段统一规范为 HH:MM（1440→14:40、下午2点→14:00）
+      if(target==='task' && ['开始时间','计划时间','计划时段','实际时段'].includes(k)) val=normClock(val);
       if(k==='状态' && !STATUS_ENUM.includes(val)) val='待办';
       if(k==='优先级' && !PRIORITY_ENUM.includes(val)) val='P2';
       if(val==='今天') val=target==='time'?dateToday():dateToday();
@@ -770,9 +788,48 @@ function agentCreateSkill(slots){
     preview:{name,description,content_md:fm+body}};
 }
 
+// 确定性拆分：按「时间段/序号/分号」把一段口述拆成多条任务 item。
+// 例：1440-1500 做A，1500-1600 做B，1600-1700 做C → 3 条，各带开始/计划时间。
+// 只在确实出现多个时间段或序号时拆分；单一事项原样返回一条，绝不臆造。
+function parseSegments(text){
+  const s=String(text||'').trim();
+  if(!s) return [];
+  // 时钟 token：1440 / 14:40 / 下午2点 / 下午2点半。用字符串构造 RegExp，故需双反斜杠
+  const clock='(?:\\d{3,4}|\\d{1,2}[:：]\\d{2}|(?:上午|下午|晚上|中午|早上)\\s*\\d{1,2}点(?:半)?)';
+  const segRe=new RegExp(clock+'\\s*[-—~至到]\\s*'+clock,'g');
+  const marks=[...s.matchAll(segRe)];
+  // 序号：1、 / ① / （1），只在段首或分号/换行后
+  const numRe=/(?:^|[；;\s])(?:\d{1,2}\s*[、.．)]|[①②③④⑤⑥⑦⑧⑨⑩]|（\d{1,2}）)/g;
+  const numMarks=[...s.matchAll(numRe)];
+  if(marks.length<2 && numMarks.length<2) return [{'任务名称':s}];
+  const cuts=[];
+  if(marks.length>=2) marks.forEach(m=>cuts.push({at:m.index,time:m[0]}));
+  else numMarks.forEach(m=>cuts.push({at:m.index+(m[0].length-m[0].trimStart().length),time:''}));
+  const items=[];
+  cuts.forEach((c,i)=>{
+    const end=i+1<cuts.length?cuts[i+1].at:s.length;
+    let body=s.slice(c.at,end).trim();
+    if(c.time) body=body.slice(c.time.length);
+    body=body.replace(/^(?:\d{1,2}\s*[、.．)]|[①②③④⑤⑥⑦⑧⑨⑩]|（\d{1,2}）)\s*/,'').replace(/^[：:，,\s。.]+/,'').trim();
+    const range=c.time||'';
+    if(!body) return;
+    const item={'任务名称':body};
+    if(range){
+      const parts=range.split(/\s*[-—~至到]\s*/);
+      if(parts[0]) item['开始时间']=parts[0];
+      if(parts[1]) item['计划时间']=parts[1];
+      item['计划时段']=range;
+    }
+    items.push(item);
+  });
+  return items.length?items:[{'任务名称':s}];
+}
+
 // 关键词兜底：AI 不可用或解析失败时用
 function classifyByKeyword(text){
   const t=String(text||'');
+  // 「今日计划：+具体内容」是录入(record)，单独的「今日计划/开工」才是查看(start)
+  if(/今日计划\s*[：:]|今天计划\s*[：:]/.test(t)) return {intent:'record',confidence:0.85,slots:{target:'task',items:parseSegments(t.replace(/^(今日计划|今天计划)\s*[：:]/,''))},reason:'今日计划录入'};
   if(/开工|今日计划|今天重点|TOP3|今天该做/i.test(t)) return {intent:'start',confidence:0.9,slots:{},reason:'关键词'};
   if(/收工|复盘|今天完成|今天做了/i.test(t)) return {intent:'wrap',confidence:0.9,slots:{},reason:'关键词'};
   if(/记一?下|加个?任务|今天的?计划是|新增|记录一下/.test(t)) return {intent:'record',confidence:0.8,slots:{target:'task',items:[{'任务名称':t.replace(/^(记一下|记录一下|加个任务|今天的计划是|新增)/,'').replace(/^[：:，,\s]+/,'').trim()}]},reason:'关键词'};
@@ -800,7 +857,7 @@ async function freeReply(message, history){
     const r=await fetch(cfg.base_url.replace(/\/+$/,'')+'/chat/completions',{
       method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.api_key},
       body:JSON.stringify({model:cfg.model,messages:[
-        {role:'system',content:sys+'\n\n你是自然对话的助手。用中文、简洁（1-3句）。可以自我介绍、回应问候、澄清用户想做什么，但不要固定套话。若用户在问信息，引导ta具体说要查什么（任务/时间/想法/复盘）。'},
+        {role:'system',content:sys+'\n\n'+nowContext()+'\n\n你是自然对话的助手。用中文、简洁（1-3句）。可以自我介绍、回应问候、澄清用户想做什么，但不要固定套话。若用户在问信息，引导ta具体说要查什么（任务/时间/想法/复盘）。'},
         {role:'user',content:(ctx?('近期对话：\n'+ctx+'\n\n'):'')+message}
       ]}),signal:AbortSignal.timeout(15000)
     });
@@ -818,7 +875,7 @@ async function classifyIntent(message, history){
   const ctxMax=cfg.context_max;
   if(ctx.length>ctxMax) ctx=ctx.slice(-ctxMax);
   const messages=[
-    {role:'system',content:getIntentSystem()},
+    {role:'system',content:getIntentSystem()+'\n\n'+nowContext()},
     {role:'user',content:(ctx?('近期对话：\n'+ctx+'\n\n'):'')+'当前输入：'+message}
   ];
   try{
@@ -908,7 +965,7 @@ async function renderWithSkill(intent, slots, facts, fallback){
     const r=await fetch(cfg.base_url.replace(/\/+$/,'')+'/chat/completions',{
       method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.api_key},
       body:JSON.stringify({model:cfg.model,messages:[
-        {role:'system',content:sys},
+        {role:'system',content:sys+'\n\n'+nowContext()},
         {role:'user',content:'以下是已从数据库核验的事实数据（JSON），请严格据此按技能模板输出；不得新增任何事实：\n'+JSON.stringify(facts,null,1)+'\n\n用户原话：'+String(slots&&slots.__raw||'')}
       ]}),
       signal:AbortSignal.timeout(20000)
@@ -1288,6 +1345,11 @@ async function handle(req,res){
     }
     let reply='', data={}, audit_ids=[];
     if(intent.intent==='record'){
+      // 确定性校正：原话含多个时间段/序号时，按时间拆分成多条，防止 LLM 把多件事压成一条
+      if(intent.slots && intent.slots.target==='task' && Array.isArray(intent.slots.items)){
+        const segs=parseSegments(message.replace(/^(记一下|记录一下|加个任务|今天的计划是|今日计划|今天计划)\s*[：:]?/,'').trim());
+        if(segs.length>1) intent.slots=Object.assign({},intent.slots,{items:segs});
+      }
       const r=agentRecord(intent.slots);
       data.created=r.created;
       audit_ids=r.created.map(x=>x._audit_id).filter(Boolean);
@@ -1345,7 +1407,7 @@ async function handle(req,res){
         data.answer=reply; data.degraded=true;
       } else {
         if(!getAIConfig().base_url||!getAIConfig().api_key) return json(res,503,{detail:'AI 未配置'});
-        const sys=buildAgentSystem('qa',{__raw:message})+'\n\n'+getPrompts().qa;
+        const sys=buildAgentSystem('qa',{__raw:message})+'\n\n'+getPrompts().qa+'\n\n'+nowContext();
         const resp=await callAI([{role:'system',content:sys+'\n\n'+buildContext(message)},{role:'user',content:message}],false);
         const d=await resp.json();
         reply=d.choices?.[0]?.message?.content||'（无返回）';
