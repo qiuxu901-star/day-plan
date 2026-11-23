@@ -3479,7 +3479,7 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
       $('pmQa').value=p.qa.content||'';
       $('pmIntentMeta').textContent=p.intent.custom?('已自定义 · '+(p.intent.updated_at||'').slice(0,16).replace('T',' ')):'使用默认';
       $('pmQaMeta').textContent=p.qa.custom?('已自定义 · '+(p.qa.updated_at||'').slice(0,16).replace('T',' ')):'使用默认';
-      $('pmSaved').textContent='共 2 段提示词 · 意图识别（决定写入逻辑）与问答语气';
+      $('pmSaved').textContent='共 6 段提示词 · 意图判断实际以技能库 intent-router 为准';
     }).catch(function(e){ $('pmSaved').textContent='读取失败：'+e.message; });
   }
   function pmFlash(text,bad){
@@ -3487,7 +3487,7 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
     m.textContent=text; m.style.color=bad?'var(--terra)':'var(--sage)';
   }
 
-  var PM_KEYS=[['intent','意图识别 · JSON','结构化分类器：判断开工/记计划/收工/问答，并抽取字段'],
+  var PM_KEYS=[['intent','意图识别 · JSON','结构化分类器：判断开工/记计划/收工/问答，并拆条。注意：实际判断优先用下方技能库的「intent-router」，改这里仅作备份，要真正生效请改技能库里的 intent-router 正文'],
     ['system','主系统词 · 套件','时间与精力管理 Agent 的角色、事实红线与思考顺序'],
     ['qa','问答词','基于记录回答时的语气与规则'],
     ['strategic','军师模式 · 套件','目标优先级、取舍与机会成本判断'],
