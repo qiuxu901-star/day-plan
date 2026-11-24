@@ -1135,6 +1135,16 @@ function normDuration(v){
   return s;
 }
 
+// 语义分流兜底：按用户内容判断这条该记去哪张表
+function inferTarget(text){
+  const t=String(text||'');
+  // 明确的时间点或已发生/做完 → 时间记录
+  if(/\d{1,2}[:：]\d{2}|\d{3,4}|点(半|整)?|小时|分钟|做完|完成了|刚才|今天.*(开|做|开完)/.test(t)) return 'time';
+  // 观点、思考、想法、疑问 → 收集箱
+  if(/思考|想法|观点|我觉得|我认为|疑问|问题|为什么|是不是|或许|灵感/.test(t)) return 'inbox';
+  return 'task';
+}
+
 // 确保 skills 表存在（兼容旧库）
 try{ db.exec(`CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, content TEXT, status TEXT DEFAULT 'active', created_at TEXT, updated_at TEXT)`); }catch(e){}
 // 旧库平滑加列（幂等）
@@ -1473,6 +1483,15 @@ async function handle(req,res){
       if(intent.slots && intent.slots.target==='task' && Array.isArray(intent.slots.items)){
         const segs=parseSegments(message.replace(/^(记一下|记录一下|加个任务|今天的计划是|今日计划|今天计划)\s*[：:]?/,'').trim());
         if(segs.length>1) intent.slots=Object.assign({},intent.slots,{items:segs});
+      }
+      // 兜底：意图判成 record 但 LLM 没抽出 items 时，用原话造最小 item 按语义分流，绝不空手而归
+      if(!intent.slots || !Array.isArray(intent.slots.items) || !intent.slots.items.length){
+        const raw=message.replace(/^(记一下|记录一下|我的思考|我的想法|思考|想法)\s*[：:]?/,'').trim();
+        const tg=(intent.slots&&intent.slots.target)||inferTarget(raw);
+        const item=tg==='inbox'?{'内容':raw,'类型':/思考|想法|观点/.test(message)?'思考':'收集'}
+          :tg==='time'?{'事项':raw,'日期':dateToday()}
+          :{'任务名称':raw};
+        intent.slots=Object.assign({},intent.slots||{},{target:tg,items:[item]});
       }
       const r=agentRecord(intent.slots);
       data.created=r.created;
