@@ -337,6 +337,54 @@ function updateRecent(history, fields){
   return {updated:out,fields:clean};
 }
 
+// 从「改优先级」消息里抽取 事项片段 + 目标级别，按顺序一一对应，去任务表模糊匹配更新。
+// 支持：①「把A、B改成P0」(同值) ②「A改P0，B改P1」/「A和B优先级分别为P0和P1」(分别)。
+function matchAndSetPriority(message){
+  const t=String(message||'');
+  const levels=[...t.matchAll(/P\s*([012])\s*级?/gi)].map(m=>'P'+m[1]);
+  if(!levels.length) return null;
+  const distinct=[...new Set(levels)];
+  // 去掉引导语和优先级描述，剩下的按标点切成事项片段
+  let body=t.replace(/^(把|请|帮|帮我|将|优先级)/g,'')
+    .replace(/(优先级|分别|依次|各自)?\s*(修改|改|设为|设|定|调整|调为|改成|变为)\s*(为)?\s*P?\s*[012]\s*级?/gi,'')
+    .replace(/P\s*[012]\s*级?/gi,'').replace(/[，,、；;。\s]+/g,' ').trim();
+  // 用时间段或标点切分事项
+  let parts=body.split(/\s+/).filter(x=>x.length>=2);
+  // 若消息里带「1430-1700」这类时间段，用它们锚定事项边界
+  const segs=[...t.matchAll(/(\d{3,4}\s*[-—~至到]\s*\d{3,4})/g)].map(m=>m[1]);
+  if(segs.length>=2){
+    parts=segs.map(s=>{
+      const i=t.indexOf(s); const next=segs.find(q=>t.indexOf(q)>i);
+      return t.slice(i,next?t.indexOf(next):t.length)
+        .replace(/\d{3,4}\s*[-—~至到]\s*\d{3,4}/g,'')
+        .replace(/P\s*[012]\s*级?/gi,'').replace(/优先级|分别|依次|修改|改|设为|为/g,'')
+        .replace(/[，,、；;。\s]+/g,' ').trim();
+    }).filter(x=>x.length>=2);
+  }
+  if(!parts.length) return null;
+  // 目标级别：分别模式按位置取，否则全用同一个值
+  const perItem=levels.length===parts.length && distinct.length>1;
+  const updated=[],before=[];
+  parts.forEach((p,i)=>{
+    // 归一化关键词：取最长的中文片段
+    const words=p.replace(/[：:（）()【】「」]/g,' ').split(/\s+/).filter(w=>w.length>=2);
+    const term=words.sort((a,b)=>b.length-a.length)[0]||p;
+    if(!term) return;
+    const rows=db.prepare("SELECT record_id,任务名称,优先级 FROM task WHERE 状态!='已完成' AND (任务名称 LIKE ? OR 事项二 LIKE ?) LIMIT 5")
+      .all('%'+term+'%','%'+term+'%');
+    if(!rows.length){ updated.push({关键词:term,error:'未匹配到任务'}); return; }
+    const target=perItem?levels[i]:distinct[0];
+    const r=rows[0];
+    const old={'优先级':r['优先级']};
+    before.push({table:'task',record_id:r['record_id'],fields:old});
+    updateRecord('task',r['record_id'],{'优先级':target},'agent');
+    updated.push({record_id:r['record_id'],名称:r['任务名称'],关键词:term,优先级:target});
+  });
+  if(!updated.length) return null;
+  audit('agent','update_priority','agent_tool','',JSON.stringify({updated,before}));
+  return {updated,before,perItem};
+}
+
 // 确定性关键词路由：常见系统管理请求直接映射工具，不依赖 LLM 选择
 function toolByKeyword(text){
   const t=String(text||'');
@@ -1525,12 +1573,23 @@ async function handle(req,res){
           audit_ids:mr.audit_id?[mr.audit_id]:[],undoable:!!mr.audit_id});
       }catch(e){ return json(res,200,{ok:false,intent:'tool',reply:'标记完成失败：'+String(e.message||e).slice(0,150)}); }
     }
-    // 最高优先级：指代「刚才那几条」+ 改字段（优先级/状态/日期）→ 直接批量改，不走意图分类
+    // 最高优先级：改优先级——按消息里的事项名模糊匹配任务表，支持「分别 P0/P1」，不依赖对话历史
+    if(/P\s*[012]\s*级?/i.test(message) && /改|设|定|调|修改|分别|依次/.test(message)){
+      const pr=matchAndSetPriority(message);
+      if(pr && pr.updated.some(x=>x.record_id)){
+        const ok=pr.updated.filter(x=>x.record_id);
+        const lines=ok.map(x=>'「'+x.名称+'」→ '+x.优先级);
+        const miss=pr.updated.filter(x=>x.error);
+        const editReply='已改 '+ok.length+' 条优先级：\n'+lines.join('\n')+
+          (miss.length?'\n未匹配：'+miss.map(x=>x.关键词).join('、'):'')+'\n可撤销。';
+        const aid=db.prepare("SELECT id FROM audit_log WHERE action='update_priority' ORDER BY id DESC LIMIT 1").get();
+        return json(res,200,{ok:true,intent:'tool',confidence:1,reply:editReply,
+          data:{tool:'update_priority',result:pr},audit_ids:aid?[aid.id]:[],undoable:!!aid});
+      }
+    }
+    // 回退：指代「刚才那几条」改字段（优先级之外的状态/日期等）
     const editFields={};
-    const PM=message.match(/P\s*([012])\s*级?|优先级\s*(?:改成|设为|定为|调为)?\s*P?\s*([012])/i);
-    if(PM) editFields['优先级']='P'+(PM[1]||PM[2]);
-    if(/今天(的)?(计划日|到期日)?/.test(message) && /(改|设|定|调到|放到)/.test(message) && !PM){
-      // 「改成今天」仅在没有优先级诉求时理解为改日期
+    if(/今天(的)?(计划日|到期日)?/.test(message) && /(改|设|定|调到|放到)/.test(message)){
       editFields['计划日']=dateToday()+'T00:00:00Z'; editFields['到期日']=dateToday()+'T00:00:00Z';
     }
     if(Object.keys(editFields).length && (refersRecent(message) || recentFromHistory(b.history).length)){
@@ -1701,7 +1760,7 @@ async function handle(req,res){
       n++;
     }
     // 撤销批量改字段（update_recent）：按 before 快照恢复
-    if(det.before && !det.record_id && det.fields && Array.isArray(det.before) && det.before[0] && det.before[0].fields){
+    if(det.before && !det.record_id && Array.isArray(det.before) && det.before[0] && det.before[0].fields && (det.fields || det.updated)){
       det.before.forEach(b=>{
         if(!TOOL_TABLES.includes(b.table)) return;
         const ks=Object.keys(b.fields).filter(k=>cols(b.table).includes(k));
