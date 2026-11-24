@@ -244,7 +244,7 @@ const AGENT_TOOLS = [
   {name:'update_skill', desc:'修改技能的名称/描述/正文。', params:{name:'技能名', fields:'对象{name|description|content:值}'}},
   {name:'delete_skill', desc:'删除技能。', params:{name:'技能名'}},
   {name:'list_prompts', desc:'列出所有提示词及是否自定义。', params:{}},
-  {name:'get_prompt', desc:'读取某段提示词全文。', params:{key:'intent|system|qa|strategic|coach|generator'}},
+  {name:'get_prompt', desc:'读取某段提示词全文。', params:{key:'intent|system|qa|strategic|coach|generator|kickoff|wrap'}},
   {name:'set_prompt', desc:'修改某段提示词，保存即生效。', params:{key:'提示词key', content:'新内容'}},
   {name:'reset_prompt', desc:'恢复某段提示词为默认。', params:{key:'intent|qa|all'}},
   {name:'get_ai_config', desc:'查看当前大模型配置（密钥脱敏）。', params:{}},
@@ -690,6 +690,130 @@ function computeReview(){
     一句话:'今日完成 '+done.length+' 项，记录时间 '+Math.round(mins)+' 分钟。'};
 }
 
+// ===== 复刻助手的开工/收工：确定性计算 + 固定渲染（不经 5 层提示词叠加）=====
+// 口径与 workboard-today-plan/analyze_plan.py 一致，保证潮汐与 WorkBuddy 答复同款
+const PRI_RANK={'P0':0,'P1':1,'P2':2};
+function d10(v){ return String(v==null?'':v).slice(0,10); }
+function effDay(t){ return d10(t['计划日'])||d10(t['到期日']); }
+function flatName(t){ const n=(t['任务名称']||'').trim(), s=(t['事项二']||'').trim(); return s?(n+' › '+s):n; }
+function kickoffScore(t, today){
+  const base={'P0':100,'P1':60,'P2':30}[(t['优先级']||'').trim()] ?? 10;
+  let s=base; const ed=effDay(t);
+  if(ed && /^\d{4}-\d{2}-\d{2}$/.test(ed)){
+    const delta=Math.round((new Date(today+'T00:00:00')-new Date(ed+'T00:00:00'))/86400000);
+    if(delta>0) s+=Math.min(delta*4,60); else if(delta===0) s+=50;
+  }
+  if((t['状态']||'').trim()==='进行中') s+=20;
+  return s;
+}
+function kickoffLine(t, today){
+  const ed=effDay(t); let od='';
+  if(ed && /^\d{4}-\d{2}-\d{2}$/.test(ed)){
+    const delta=Math.round((new Date(today+'T00:00:00')-new Date(ed+'T00:00:00'))/86400000);
+    if(delta>0) od='逾期'+delta+'天';
+  }
+  return {任务:flatName(t),优先级:(t['优先级']||'').trim()||'未设',状态:(t['状态']||'').trim()||'未填',
+    计划日:d10(t['计划日']),到期日:d10(t['到期日']),
+    计划时间:String(t['计划时间']||'').slice(0,5),时段:(t['时段']||'').trim(),
+    事项类型:(t['事项类型']||'').trim(),负责人:(t['负责人']||'').trim()||'未填',
+    逾期:od,分数:kickoffScore(t,today)};
+}
+function computeKickoff(){
+  const today=dateToday();
+  const horizon=14;
+  const hd=new Date(today+'T00:00:00'); hd.setDate(hd.getDate()+horizon);
+  const horizonEnd=hd.toISOString().slice(0,10);
+  const all=db.prepare(`SELECT * FROM ${q('task')}`).all();
+  const open=all.filter(t=>(t['状态']||'').trim()!=='已完成');
+  const overdue=[],todayList=[],soon=[],unsched=[];
+  open.forEach(t=>{
+    const ed=effDay(t);
+    if(!ed) unsched.push(t); else if(ed<today) overdue.push(t);
+    else if(ed===today) todayList.push(t); else if(ed<=horizonEnd) soon.push(t);
+  });
+  const key=(a,b)=>(kickoffScore(b,today)-kickoffScore(a,today)) ||
+    ((PRI_RANK[(a['优先级']||'').trim()]??9)-(PRI_RANK[(b['优先级']||'').trim()]??9)) ||
+    flatName(a).localeCompare(flatName(b));
+  overdue.sort(key); todayList.sort(key);
+  soon.sort((a,b)=>effDay(a).localeCompare(effDay(b)) ||
+    ((PRI_RANK[(a['优先级']||'').trim()]??9)-(PRI_RANK[(b['优先级']||'').trim()]??9)) ||
+    flatName(a).localeCompare(flatName(b)));
+  const cand=overdue.concat(todayList).sort(key).slice(0,3);
+  const reason=t=>((t['优先级']||'').trim()==='P0')?'P0':(effDay(t)<today?'已逾期':'今日到期');
+  return {
+    日期:today,星期:['周日','周一','周二','周三','周四','周五','周六'][new Date(today+'T00:00:00').getDay()],
+    总表:{任务总数:all.length,未完成:open.length,历史累计已完成:all.length-open.length,
+      逾期未完成:overdue.length,今日到期未完成:todayList.length,近期未完成:soon.length,
+      无日期待办:unsched.length,近期窗口:'至 '+horizonEnd,
+      待办总压力:overdue.length+todayList.length+soon.length},
+    延期事项:overdue.map(t=>kickoffLine(t,today)),
+    今日事项:todayList.map(t=>kickoffLine(t,today)),
+    近期事项:soon.map(t=>kickoffLine(t,today)),
+    无日期待办:unsched.map(t=>kickoffLine(t,today)),
+    最关键3件:cand.map(t=>Object.assign(kickoffLine(t,today),{入选理由:reason(t)})),
+    依据:'P0=100 / P1=60 / P2=30（未设=10），逾期每天+4（上限60），今日到期+50，进行中+20；候选=逾期未完成+今日到期未完成。'
+  };
+}
+// 固定渲染成和助手开工一致的 Markdown；style 为用户提供的一段短提示词（可选，仅控制详略/语气段落）
+function renderKickoff(k, style){
+  const g=k.总表;
+  // style 为用户提供的一段短提示词：可写「不显示近期」「不显示特殊情况」等开关，或一行结尾语
+  const st=String(style||'');
+  const hide=(re)=>re.test(st);
+  const showRecent=!hide(/不显示近期|隐藏近期|去掉近期/);
+  const showNotes=!hide(/不显示特殊情况|隐藏特殊情况|去掉特殊情况/);
+  const showUnsched=!hide(/不显示无日期|隐藏无日期/);
+  let s='## 🔥 今天最关键的 3 件事\n\n';
+  if(k.最关键3件.length){
+    k.最关键3件.forEach((x,i)=>{
+      s+=(i+1)+'. **['+x.优先级+'] '+x.任务+'** ｜计划日 '+(x.计划日||'无')+' ｜'+x.状态+'\n';
+      s+='   理由：'+x.入选理由+(x.逾期?(' · '+x.逾期):'')+'，'+x.分数+' 分\n';
+    });
+  } else s+='无（没有逾期或今日到期事项）\n';
+  s+='\n> 排序依据：'+k.依据+'\n';
+  s+='\n## 📋 今日总表 · '+k.日期+' '+k.星期+'\n\n';
+  s+='| 指标 | 数值 |\n|---|---|\n';
+  s+='| 待办总压力 | '+g.待办总压力+' 条（延期 '+g.逾期未完成+' / 今日 '+g.今日到期未完成+' / 近期 '+g.近期未完成+'） |\n';
+  s+='| 任务总数 / 未完成 | '+g.任务总数+' / '+g.未完成+' |\n';
+  s+='| 逾期未完成 | '+g.逾期未完成+' 条 |\n';
+  s+='| 今日到期未完成 | '+g.今日到期未完成+' 条 |\n';
+  s+='| 近期未完成（'+g.近期窗口+'） | '+g.近期未完成+' 条 |\n';
+  s+='| 无日期待办 | '+g.无日期待办+' 条 |\n';
+  const tbl=(title,rows,cols)=>{
+    let t='\n## '+title+'（'+rows.length+' 条）\n';
+    if(!rows.length){ return t+'\n无\n'; }
+    t+='\n| '+(cols.map(c=>c[0]).join(' | '))+' |\n|'+cols.map(()=>'---').join('|')+'|\n';
+    rows.forEach(x=>{ t+='| '+cols.map(c=>String(x[c[1]]||'')).join(' | ')+' |\n'; });
+    return t;
+  };
+  s+=tbl('⏰ 延期事项',k.延期事项,[['事项','任务'],['优先级','优先级'],['状态','状态'],['原计划日','计划日'],['逾期','逾期'],['时段','时段'],['负责人','负责人']]);
+  s+=tbl('📌 今日事项',k.今日事项,[['事项','任务'],['优先级','优先级'],['计划时间','计划时间'],['时段','时段'],['事项类型','事项类型'],['负责人','负责人']]);
+  if(showRecent) s+=tbl('🗓 近期事项 · '+g.近期窗口,k.近期事项,[['事项','任务'],['优先级','优先级'],['计划日','计划日'],['时段','时段'],['负责人','负责人']]);
+  if(showUnsched && k.无日期待办.length) s+=tbl('📋 无日期待办',k.无日期待办,[['事项','任务'],['优先级','优先级'],['状态','状态']]);
+  // 特殊情况：只陈述客观数据异常，不评价、不臆断
+  let notes=[];
+  if(g.今日到期未完成===0) notes.push('今日到期未完成为 0，压力集中在延期。');
+  const unset=k.延期事项.concat(k.今日事项,k.近期事项,k.无日期待办).filter(x=>x.优先级==='未设').length;
+  if(unset) notes.push(unset+' 条优先级为「未设」，字段缺失，未替你补填。');
+  if(g.无日期待办) notes.push(g.无日期待办+' 条无计划日/到期日，未臆造日期。');
+  if(showNotes) s+='\n## 特殊情况\n'+(notes.length?('\n'+notes.map(x=>'- '+x).join('\n')+'\n'):'\n无\n');
+  // 结尾附加语：提示词里以「结尾：」开头的一行，原样附在末尾（用户自定义）
+  const tail=(st.match(/结尾[：:]\s*(.+)/)||[])[1];
+  if(tail) s+='\n'+tail.trim()+'\n';
+  return s;
+}
+function computeWrap(){ return computeReview(); }
+function renderWrap(r, style){
+  const st=String(style||'');
+  let s='## 收工小结 · '+dateToday()+'\n\n';
+  s+=r.一句话+'\n\n';
+  s+='- 今日完成：'+(r.今日完成.length?r.今日完成.join('、'):'无')+'\n';
+  s+='- 时间记录：'+r.时间记录数+' 条，合计 '+r.总时长分钟+' 分钟\n';
+  const tail=(st.match(/结尾[：:]\s*(.+)/)||[])[1];
+  if(tail) s+='\n'+tail.trim()+'\n';
+  return s;
+}
+
 // 把 LLM 槽位安全落地：白名单 → 枚举归一 → 必填校验
 function agentRecord(slots){
   const target=(slots&&slots.target)||'task';
@@ -904,8 +1028,10 @@ try{ db.exec(`CREATE TABLE IF NOT EXISTS ai_config (
 // Agent 提示词表（网页可编辑，可恢复默认）
 try{ db.exec(`CREATE TABLE IF NOT EXISTS prompts (
   key TEXT PRIMARY KEY, content TEXT, updated_at TEXT)`); }catch(e){}
-const PROMPT_KEYS=['intent','qa','system','strategic','coach','generator'];
-const DEFAULT_PROMPTS={intent:DEFAULT_INTENT, qa:DEFAULT_QA, system:'', strategic:'', coach:'', generator:''};
+const DEFAULT_KICKOFF='# 开工答复格式（你可以直接改这段）\n\n数据由代码从任务表实时算出，你改的是\u201c怎么呈现\u201d，不是数据本身。\n固定结构：🔥最关键3件事 → 📋总表 → ⏰延期 → 📌今日 → 🗓近期 → 📋无日期 → 特殊情况。\n规则：只陈述数据里真实存在的；空字段显示空，不脑补；不评价人（不说拖延/低效），只给事实。\n语气：中文、简洁、表格优先。不要写\u201c证据边界\u201d\u201c一个阻塞问题\u201d\u201c认知类型unknown\u201d这类套话。';
+const DEFAULT_WRAP='# 收工答复格式（你可以直接改这段）\n\n数据由代码实时算出。固定结构：一句话小结 → 今日完成清单 → 时间记录条数与合计分钟。\n只陈述事实，不评价、不建议；字段空就说无。';
+const PROMPT_KEYS=['intent','qa','system','strategic','coach','generator','kickoff','wrap'];
+const DEFAULT_PROMPTS={intent:DEFAULT_INTENT, qa:DEFAULT_QA, system:'', strategic:'', coach:'', generator:'', kickoff:DEFAULT_KICKOFF, wrap:DEFAULT_WRAP};
 function getPrompts(){
   const out=Object.assign({},DEFAULT_PROMPTS);
   try{
@@ -1340,9 +1466,7 @@ async function handle(req,res){
       if(b.preset_intent==='create_skill') intent.intent='create_skill';
     }
     const conf=Number(intent.confidence)||0;
-    if(intent.intent==='record' && conf<0.6){
-      return json(res,200,{ok:false,intent:'unclear',reply:'没太确定要记什么，能说得更具体一点吗？（比如「记一下：明天下午开会」）',need_confirm:true});
-    }
+    // 低置信度不再拦截：识别成 record 就照常写入，字段有白名单+类型校验兜底，无需反问用户
     let reply='', data={}, audit_ids=[];
     if(intent.intent==='record'){
       // 确定性校正：原话含多个时间段/序号时，按时间拆分成多条，防止 LLM 把多件事压成一条
@@ -1360,20 +1484,14 @@ async function handle(req,res){
         {写入结果:r.created,未写入:r.errors}, fallback);
       reply=rendered||fallback;
     } else if(intent.intent==='start'){
-      const t=computeTop3();
-      data.top3=t.关键3件; data.summary={未完成:t.未完成总数,逾期:t.逾期数};
-      const lines=t.关键3件.map((x,i)=>(i+1)+'. ['+x.优先级+'] '+x.任务+'（'+(x.状态||'待办')+'，'+x.分数+'分）');
-      const fallback='当前最重要的 3 件事：\n'+(lines.join('\n')||'暂无逾期或今日到期事项')+
-            '\n未完成 '+t.未完成总数+' 项，其中逾期 '+t.逾期数+' 项。';
-      const rendered=await renderWithSkill('start',{__raw:message},
-        {日期:dateToday(),关键3件:t.关键3件,未完成:t.未完成总数,逾期:t.逾期数}, fallback);
-      reply=rendered||fallback;
+      // 复刻助手开工答复：确定性计算 + 固定渲染，不再叠 5 层提示词（军师/教练/技能/参考）
+      const k=computeKickoff();
+      data.top3=k.最关键3件; data.kickoff=k.总表; data.summary={未完成:k.总表.未完成,逾期:k.总表.逾期未完成};
+      reply=renderKickoff(k, getPrompts().kickoff||'');
     } else if(intent.intent==='wrap'){
-      const rv=computeReview();
+      const rv=computeWrap();
       data.summary=rv;
-      const fallback=rv.一句话+'\n完成：'+(rv.今日完成.join('、')||'无')+'。';
-      const rendered=await renderWithSkill('wrap',{__raw:message},rv,fallback);
-      reply=rendered||fallback;
+      reply=renderWrap(rv, getPrompts().wrap||'');
     } else if(intent.intent==='qa' && /APP.?Key|密钥|技能|提示词|模型配置|什么模型|哪个模型|模型名|同步队列|待同步|吊销|生成.{0,4}key/i.test(message)){
       // 保险：系统管理对象不在业务表里，qa 查不到 → 强制走工具
       intent=Object.assign({},intent,{intent:'tool',slots:{tool_call:{tool:'',args:{}}},reason:'qa转tool'});
