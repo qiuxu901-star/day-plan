@@ -1634,7 +1634,7 @@ async function handle(req,res){
       // 确定性校正：原话含多个时间段/序号时，按时间拆成多条，防止 LLM 只抽开始时间/把多件事压成一条
       if(intent.slots && (intent.slots.target==='task'||intent.slots.target==='time')){
         const segs=parseSegments(message.replace(/^(记一下|记录一下|加个任务|今天的计划是|今日计划|今天计划)\s*[：:]?/,'').trim());
-        if(segs.length>1){
+        if(segs.length>=1){
           const adapted=segs.map(x=>{
             if(intent.slots.target==='time'){
               const o=Object.assign({},x);
