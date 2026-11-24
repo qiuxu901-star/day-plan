@@ -303,6 +303,40 @@ function formatToolResult(tool, r){
   }catch(e){ return JSON.stringify(r).slice(0,1500); }
 }
 
+// 从对话历史里找「刚记的那几条」：取最近一条带 recent 的 AI 消息
+function recentFromHistory(history){
+  const h=Array.isArray(history)?history:[];
+  for(let i=h.length-1;i>=0;i--){
+    if(h[i] && h[i].role==='ai' && Array.isArray(h[i].recent) && h[i].recent.length) return h[i].recent;
+  }
+  return [];
+}
+// 指代解析：用户说「这两条/刚才的/刚记的」→ 指向 recent；否则空
+function refersRecent(text){
+  return /(刚才|刚记|这两?条|上面|那两?条|它们|这两个|前两?条)/.test(String(text||''));
+}
+// 批量改最近几条记录的字段（优先级/状态/日期/时间等），只动明确的字段
+function updateRecent(history, fields){
+  const targets=recentFromHistory(history);
+  if(!targets.length) return {error:'最近没有可修改的记录，先告诉我改哪一条。'};
+  const clean={};
+  Object.entries(fields||{}).forEach(([k,v])=>{ if(v!==undefined&&v!==null&&String(v).trim()) clean[k]=String(v).trim(); });
+  if(!Object.keys(clean).length) return {error:'没说要改什么字段。'};
+  const out=[];
+  const before=[];
+  targets.forEach(t=>{
+    const tbl=TOOL_TABLES.includes(t.table)?t.table:'task';
+    const cur=db.prepare(`SELECT * FROM ${q(tbl)} WHERE record_id=?`).get(t.record_id);
+    if(!cur){ out.push({record_id:t.record_id,error:'记录不存在'}); return; }
+    const oldFields={}; Object.keys(clean).forEach(k=>oldFields[k]=cur[k]);
+    before.push({table:tbl,record_id:t.record_id,fields:oldFields});
+    const r=updateRecord(tbl,t.record_id,clean,'agent');
+    out.push({record_id:t.record_id,名称:t['名称']||cur['任务名称']||'',updated:r?r.updated:0});
+  });
+  audit('agent','update_recent','agent_tool','',JSON.stringify({fields:clean,targets:out.map(x=>x.record_id),before}));
+  return {updated:out,fields:clean};
+}
+
 // 确定性关键词路由：常见系统管理请求直接映射工具，不依赖 LLM 选择
 function toolByKeyword(text){
   const t=String(text||'');
@@ -802,6 +836,34 @@ function renderKickoff(k, style){
   if(tail) s+='\n'+tail.trim()+'\n';
   return s;
 }
+// 记录回执：确定性渲染（不复述规则、不加脑补分析、不出现方法论术语）
+function renderRecordResult(r, target, style){
+  const created=r.created||[], errors=r.errors||[];
+  const NAME={task:'任务',time:'时间记录',inbox:'收集箱',review:'复盘'}[target]||'记录';
+  let s='**结论**：'+(created.length?('已记下 '+created.length+' 条'+NAME):'没有写入')+'。\n\n';
+  if(created.length){
+    s+='**详细**\n\n| 内容 | 类型/优先级 | 时间 |\n|---|---|---|\n';
+    created.forEach(x=>{
+      const content=x['任务名称']||x['事项']||x['内容']||x['日期']||'';
+      const type=x['类型']||x['优先级']||'';
+      const time=x['开始时间']?x['开始时间']+(x['计划时间']?'–'+x['计划时间']:'')
+        :(x['计划日']?String(x['计划日']).slice(0,10):(x['日期']?String(x['日期']).slice(0,10):''));
+      s+='| '+String(content).replace(/\|/g,'/')+' | '+type+' | '+time+' |\n';
+    });
+  }
+  // 特殊情况：只陈述客观字段缺失，绝不写缓冲期/必须守住/完整可以具体这类分析
+  const notes=[];
+  created.forEach(x=>{
+    if(target==='task' && !x['开始时间'] && !x['计划日']) notes.push('「'+(x['任务名称']||'')+'」没说时间，先空着。');
+  });
+  if(errors.length) notes=notes.concat(errors);
+  s+='\n**特殊情况**：'+(notes.length?notes.join(' '):'无')+'\n';
+  // 用户自定义结尾语（提示词「结尾：」）
+  const tail=(String(style||'').match(/结尾[：:]\s*(.+)/)||[])[1];
+  if(tail) s+='\n'+tail.trim()+'\n';
+  return s;
+}
+
 function computeWrap(){ return computeReview(); }
 function renderWrap(r, style){
   const st=String(style||'');
@@ -845,6 +907,11 @@ function agentRecord(slots){
       if(target==='task' && ['开始时间','计划时间','计划时段','实际时段'].includes(k)) val=normClock(val);
       if(k==='状态' && !STATUS_ENUM.includes(val)) val='待办';
       if(k==='优先级' && !PRIORITY_ENUM.includes(val)) val='P2';
+      // 类型只用固定枚举，自造分类一律留空（不让「创造输出/梳理分析」入库）
+      const ENUMS={'事项类型':['深度思考','独立专注','复杂协作','简单协作'],
+        时段:['上午深度','下午协作','弹性灵感'],类型:['收集','问题','思考'],
+        主线执行:['主线任务','执行任务']};
+      if(ENUMS[k] && val && !ENUMS[k].includes(val)) val='';
       if(val==='今天') val=target==='time'?dateToday():dateToday();
       if(val==='明天') val=dateTomorrow();
       clean[k]=val;
@@ -1458,6 +1525,24 @@ async function handle(req,res){
           audit_ids:mr.audit_id?[mr.audit_id]:[],undoable:!!mr.audit_id});
       }catch(e){ return json(res,200,{ok:false,intent:'tool',reply:'标记完成失败：'+String(e.message||e).slice(0,150)}); }
     }
+    // 最高优先级：指代「刚才那几条」+ 改字段（优先级/状态/日期）→ 直接批量改，不走意图分类
+    const editFields={};
+    const PM=message.match(/P\s*([012])\s*级?|优先级\s*(?:改成|设为|定为|调为)?\s*P?\s*([012])/i);
+    if(PM) editFields['优先级']='P'+(PM[1]||PM[2]);
+    if(/今天(的)?(计划日|到期日)?/.test(message) && /(改|设|定|调到|放到)/.test(message) && !PM){
+      // 「改成今天」仅在没有优先级诉求时理解为改日期
+      editFields['计划日']=dateToday()+'T00:00:00Z'; editFields['到期日']=dateToday()+'T00:00:00Z';
+    }
+    if(Object.keys(editFields).length && (refersRecent(message) || recentFromHistory(b.history).length)){
+      const ur=updateRecent(b.history, editFields);
+      if(!ur.error){
+        const rows=ur.updated.map(x=>(x.名称||x.record_id.slice(0,8))+' → '+Object.entries(editFields).map(([k,v])=>k+' '+v).join('、'));
+        reply='已改 '+ur.updated.length+' 条：\n'+rows.join('\n')+'\n可撤销。';
+        const aid=db.prepare("SELECT id FROM audit_log WHERE action='update_recent' ORDER BY id DESC LIMIT 1").get();
+        return json(res,200,{ok:true,intent:'tool',confidence:1,reply,
+          data:{tool:'update_recent',result:ur},audit_ids:aid?[aid.id]:[],undoable:!!aid});
+      }
+    }
     let intent;
     if(b.preset_intent==='tool' && b.slots && b.slots.tool_call && b.slots.tool_call.tool){
       intent={intent:'tool',confidence:1,slots:b.slots,reason:'指定工具'};
@@ -1496,12 +1581,11 @@ async function handle(req,res){
       const r=agentRecord(intent.slots);
       data.created=r.created;
       audit_ids=r.created.map(x=>x._audit_id).filter(Boolean);
-      const lines=r.created.map((x,i)=>(i+1)+'. '+Object.entries(x).filter(([k,v])=>v&&typeof v==='string'&&['任务名称','事项','内容','状态','优先级','计划日','开始时间'].includes(k)).map(([,v])=>v).slice(0,3).join(' / '));
-      const fallback='已记下 '+r.created.length+' 条：\n'+(lines.join('\n')||'（无）')+
-            (r.errors.length?'\n未写入：'+r.errors.join('；'):'')+'\n数据已保存，稍后同步到其他端。';
-      const rendered=await renderWithSkill('record',Object.assign({__raw:message},intent.slots||{}),
-        {写入结果:r.created,未写入:r.errors}, fallback);
-      reply=rendered||fallback;
+      // 回传刚记条目的元信息，前端存进 history，供下一句「把这两条改成P0」指代
+      data.recent=r.created.map(x=>({record_id:x.record_id,table:x.table||intent.slots.target,
+        名称:x['任务名称']||x['事项']||x['内容']||''}));
+      // 确定性回执：不经过 LLM，杜绝缓冲期/必须守住/完整具体这类自造分析
+      reply=renderRecordResult(r, intent.slots&&intent.slots.target, getPrompts().record||'');
     } else if(intent.intent==='start'){
       // 复刻助手开工答复：确定性计算 + 固定渲染，不再叠 5 层提示词（军师/教练/技能/参考）
       const k=computeKickoff();
@@ -1615,6 +1699,15 @@ async function handle(req,res){
       db.prepare(`INSERT OR REPLACE INTO ${q(det.table)} (${ks.map(q).join(',')}) VALUES (${ks.map(()=>'?').join(',')})`)
         .run(...ks.map(k=>b[k]));
       n++;
+    }
+    // 撤销批量改字段（update_recent）：按 before 快照恢复
+    if(det.before && !det.record_id && det.fields && Array.isArray(det.before) && det.before[0] && det.before[0].fields){
+      det.before.forEach(b=>{
+        if(!TOOL_TABLES.includes(b.table)) return;
+        const ks=Object.keys(b.fields).filter(k=>cols(b.table).includes(k));
+        if(ks.length) db.prepare(`UPDATE ${q(b.table)} SET ${ks.map(k=>k+'=?').join(',')} WHERE record_id=?`).run(...ks.map(k=>b.fields[k]),b.record_id);
+        n++;
+      });
     }
     // 撤销提示词修改：恢复修改前内容
     if(det.key && det.prev_content!==undefined){

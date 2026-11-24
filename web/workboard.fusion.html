@@ -3843,7 +3843,9 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
           }).join('')+'</div>';
         }
         agentBubble('ai',html,r);
-        agentState.history.push({role:'ai',text:(r.reply||'').slice(0,400)});
+        var hEntry={role:'ai',text:(r.reply||'').slice(0,400)};
+        if(r.data && r.data.recent && r.data.recent.length) hEntry.recent=r.data.recent;
+        agentState.history.push(hEntry);
         if(r.data && r.data.created) { if(typeof refreshAll==='function') refreshAll(); }
       })
       .catch(function(e){
