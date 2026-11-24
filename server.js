@@ -1537,9 +1537,9 @@ async function handle(req,res){
       const ur=updateRecent(b.history, editFields);
       if(!ur.error){
         const rows=ur.updated.map(x=>(x.名称||x.record_id.slice(0,8))+' → '+Object.entries(editFields).map(([k,v])=>k+' '+v).join('、'));
-        reply='已改 '+ur.updated.length+' 条：\n'+rows.join('\n')+'\n可撤销。';
+        const editReply='已改 '+ur.updated.length+' 条：\n'+rows.join('\n')+'\n可撤销。';
         const aid=db.prepare("SELECT id FROM audit_log WHERE action='update_recent' ORDER BY id DESC LIMIT 1").get();
-        return json(res,200,{ok:true,intent:'tool',confidence:1,reply,
+        return json(res,200,{ok:true,intent:'tool',confidence:1,reply:editReply,
           data:{tool:'update_recent',result:ur},audit_ids:aid?[aid.id]:[],undoable:!!aid});
       }
     }
