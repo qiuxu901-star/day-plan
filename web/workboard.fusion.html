@@ -3902,17 +3902,19 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
       var html=(h.role==='me')?escHtml(h.text||''):mdToHtml(h.text||'');
       agentBubble(h.role||'ai',html,null);
     });
-    var tg=$('agentHistoryToggle'); if(tg) tg.style.display='none';
     box.scrollTop=box.scrollHeight;
   }
   function initAgent(){
-    // 恢复历史（默认收起）
+    // 恢复历史：气泡全部进 DOM，默认停在底部只看最新；向上滑即可看到更早对话
     agentState.history=loadAgentHistory();
+    if(agentState.history.length) renderAgentHistory();
     var tg=$('agentHistoryToggle');
     if(tg && agentState.history.length){
       tg.style.display='';
-      var cnt=$('agentHistoryCount'); if(cnt) cnt.textContent='（'+agentState.history.length+'）';
-      tg.onclick=function(){ agentState.historyOpen=true; renderAgentHistory(); };
+      tg.textContent='↓ 回到最新（'+agentState.history.length+' 条历史）';
+      tg.onclick=function(){
+        var box=$('agentThread'); if(box) box.scrollTop=box.scrollHeight;
+      };
     }
     var form=$('agentForm'), inp=$('agentInput');
     if(form) form.onsubmit=function(e){ e.preventDefault(); agentSend(inp?inp.value:''); };

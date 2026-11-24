@@ -1056,8 +1056,14 @@ function parseSegments(text){
     if(range){
       const parts=range.split(/\s*[-—~至到]\s*/);
       if(parts[0]) item['开始时间']=parts[0];
-      if(parts[1]) item['计划时间']=parts[1];
+      if(parts[1]){ item['计划时间']=parts[1]; item['结束时间']=parts[1]; }
       item['计划时段']=range;
+      // time 表有「时长」字段：由区间自动算分钟（不臆造，纯算术）
+      if(parts[0]&&parts[1]){
+        const cm=v=>{const m=String(v).match(/^(\d{1,2})[:：](\d{2})$/);if(m)return (+m[1])*60+(+m[2]);const q=String(v).match(/^(\d{2})(\d{2})$/);return q?(+q[1])*60+(+q[2]):null;};
+        const a=cm(parts[0]),b=cm(parts[1]);
+        if(a!==null&&b!==null&&b>a) item['时长']=String(b-a);
+      }
     }
     items.push(item);
   });
@@ -1623,10 +1629,21 @@ async function handle(req,res){
     // 低置信度不再拦截：识别成 record 就照常写入，字段有白名单+类型校验兜底，无需反问用户
     let reply='', data={}, audit_ids=[];
     if(intent.intent==='record'){
-      // 确定性校正：原话含多个时间段/序号时，按时间拆分成多条，防止 LLM 把多件事压成一条
-      if(intent.slots && intent.slots.target==='task' && Array.isArray(intent.slots.items)){
+      // 确定性校正：原话含多个时间段/序号时，按时间拆成多条，防止 LLM 只抽开始时间/把多件事压成一条
+      if(intent.slots && (intent.slots.target==='task'||intent.slots.target==='time')){
         const segs=parseSegments(message.replace(/^(记一下|记录一下|加个任务|今天的计划是|今日计划|今天计划)\s*[：:]?/,'').trim());
-        if(segs.length>1) intent.slots=Object.assign({},intent.slots,{items:segs});
+        if(segs.length>1){
+          const adapted=segs.map(x=>{
+            if(intent.slots.target==='time'){
+              const o=Object.assign({},x);
+              o['事项']=o['任务名称']; delete o['任务名称']; delete o['计划时间']; delete o['计划时段'];
+              if(!o['日期']) o['日期']=dateToday();
+              return o;
+            }
+            return x;
+          });
+          intent.slots=Object.assign({},intent.slots,{items:adapted});
+        }
       }
       // 兜底：意图判成 record 但 LLM 没抽出 items 时，用原话造最小 item 按语义分流，绝不空手而归
       if(!intent.slots || !Array.isArray(intent.slots.items) || !intent.slots.items.length){
