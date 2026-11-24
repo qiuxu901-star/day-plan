@@ -894,8 +894,10 @@ function renderRecordResult(r, target, style){
     created.forEach(x=>{
       const content=x['任务名称']||x['事项']||x['内容']||x['日期']||'';
       const type=x['类型']||x['优先级']||'';
-      const time=x['开始时间']?x['开始时间']+(x['计划时间']?'–'+x['计划时间']:'')
-        :(x['计划日']?String(x['计划日']).slice(0,10):(x['日期']?String(x['日期']).slice(0,10):''));
+      const end=x['结束时间']||x['计划时间']||'';
+      let time=x['开始时间']?(x['开始时间']+(end?'–'+end:'')):'';
+      if(x['时长']) time+=(time?'（':'')+x['时长']+'分钟'+(time?'）':'');
+      if(!time) time=x['计划日']?String(x['计划日']).slice(0,10):(x['日期']?String(x['日期']).slice(0,10):'');
       s+='| '+String(content).replace(/\|/g,'/')+' | '+type+' | '+time+' |\n';
     });
   }
