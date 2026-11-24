@@ -912,7 +912,7 @@ function renderKickoff(k, style){
   if(g.无日期待办) notes.push(g.无日期待办+' 条无计划日/到期日，未臆造日期。');
   if(showNotes) s+='\n## 特殊情况\n'+(notes.length?('\n'+notes.map(x=>'- '+x).join('\n')+'\n'):'\n无\n');
   // 结尾附加语：提示词里以「结尾：」开头的一行，原样附在末尾（用户自定义）
-  const tail=(st.match(/结尾[：:]\s*(.+)/)||[])[1];
+  const tail=(st.match(/^\s*结尾[：:]\s*(.+)$/m)||[])[1];
   if(tail) s+='\n'+tail.trim()+'\n';
   return s;
 }
@@ -972,7 +972,7 @@ function renderWrap(r, style){
   if(r.未匹配计划项) notes.push(r.未匹配计划项+' 项计划没有对应时间记录（可能没做，或做了没记）。');
   if(r.总时长分钟===0) notes.push('总时长为 0，检查时间记录是否填了时长。');
   s+='\n### 特殊情况\n'+(notes.length?('\n'+notes.map(x=>'- '+x).join('\n')+'\n'):'\n无\n');
-  const tail=(st.match(/结尾[：:]\s*(.+)/)||[])[1];
+  const tail=(st.match(/^\s*结尾[：:]\s*(.+)$/m)||[])[1];
   if(tail) s+='\n'+tail.trim()+'\n';
   return s;
 }
