@@ -759,17 +759,49 @@ function computeTop3(){
     const due=(r['到期日']||'').slice(0,10); return due&&due<today; }).length};
 }
 
+// 收工对账：今日计划 vs 实际时间投入（客观数据，事项名匹配，不脑补完成状态）
 function computeReview(){
   const today=dateToday();
-  const done=db.prepare(`SELECT * FROM ${q('task')}`).all().filter(r=>{
-    const f=(r['完成时间']||'').slice(0,10), p=(r['计划日']||'').slice(0,10);
-    return f===today || (r['状态']==='已完成' && p===today);
-  });
+  const allTasks=db.prepare(`SELECT * FROM ${q('task')}`).all();
   const times=db.prepare(`SELECT * FROM ${q('time')}`).all().filter(r=>(r['日期']||'').slice(0,10)===today);
-  let mins=0; times.forEach(r=>{ const v=parseFloat(r['时长']); if(!isNaN(v)) mins+=v; });
-  return {今日完成:done.map(r=>r['任务名称']||''), 完成数:done.length,
-    时间记录数:times.length, 总时长分钟:Math.round(mins),
-    一句话:'今日完成 '+done.length+' 项，记录时间 '+Math.round(mins)+' 分钟。'};
+  // 今日计划 = 计划日或到期日落今天、未完成的任务
+  const planned=allTasks.filter(r=>{
+    const p=(r['计划日']||'').slice(0,10), d=(r['到期日']||'').slice(0,10);
+    return (p===today||d===today) && (r['状态']||'')!=='已完成';
+  });
+  // 时间记录聚合（按事项名归一化）
+  const norm=s=>String(s||'').replace(/[，。！？、：:「」\s]/g,'').toLowerCase();
+  const timeByName={};
+  times.forEach(r=>{
+    const n=norm(r['事项']); const m=parseFloat(r['时长']);
+    if(!timeByName[n]) timeByName[n]={名称:r['事项']||'',分钟:0,条数:0,起止:[]};
+    timeByName[n].分钟+=isNaN(m)?0:m; timeByName[n].条数++;
+    if(r['开始时间']||r['结束时间']) timeByName[n].起止.push((r['开始时间']||'')+(r['结束时间']?'–'+r['结束时间']:''));
+  });
+  // 对账：每条今日计划，找名字包含关系的时间记录（双向包含）
+  const reconcile=planned.map(t=>{
+    const tn=norm((t['任务名称']||'')+(t['事项二']||''));
+    const hits=Object.values(timeByName).filter(v=>{
+      const s=norm(v.名称);
+      return (tn&&s&&(tn.indexOf(s)>=0||s.indexOf(tn)>=0));
+    });
+    const mins=hits.reduce((a,b)=>a+b.分钟,0);
+    return {任务:(t['任务名称']||'')+(t['事项二']?' › '+t['事项二']:''),
+      优先级:t['优先级']||'未设',状态:t['状态']||'',
+      有计划时间:!!t['计划时间'],投入分钟:mins,有记录:hits.length>0};
+  });
+  const totalMin=times.reduce((a,r)=>a+(parseFloat(r['时长'])||0),0);
+  const matched=reconcile.filter(x=>x.有记录).length;
+  return {
+    今日计划数:planned.length,
+    对账:reconcile,
+    已投入计划项:matched,
+    未匹配计划项:planned.length-matched,
+    时间记录:Object.values(timeByName).sort((a,b)=>b.分钟-a.分钟),
+    时间记录数:times.length,
+    总时长分钟:Math.round(totalMin),
+    一句话:'今日计划 '+planned.length+' 项，其中 '+matched+' 项有时间投入；记录 '+times.length+' 段、共 '+Math.round(totalMin)+' 分钟。'
+  };
 }
 
 // ===== 复刻助手的开工/收工：确定性计算 + 固定渲染（不经 5 层提示词叠加）=====
@@ -917,10 +949,29 @@ function renderRecordResult(r, target, style){
 function computeWrap(){ return computeReview(); }
 function renderWrap(r, style){
   const st=String(style||'');
-  let s='## 收工小结 · '+dateToday()+'\n\n';
-  s+=r.一句话+'\n\n';
-  s+='- 今日完成：'+(r.今日完成.length?r.今日完成.join('、'):'无')+'\n';
-  s+='- 时间记录：'+r.时间记录数+' 条，合计 '+r.总时长分钟+' 分钟\n';
+  let s='## 收工小结 · '+dateToday()+'\n\n'+r.一句话+'\n';
+  // 一、计划 vs 实际对账
+  s+='\n### 计划 vs 实际\n\n';
+  if(r.对账.length){
+    s+='| 今日计划 | 优先级 | 状态 | 时间投入 |\n|---|---|---|---|\n';
+    r.对账.forEach(x=>{
+      const投入=x.有记录?(x.投入分钟+' 分钟'):'无记录';
+      s+='| '+String(x.任务).replace(/\|/g,'/')+' | '+x.优先级+' | '+x.状态+' | '+投入+' |\n';
+    });
+  } else s+='今日无计划项。\n';
+  // 二、时间都花在哪（按事项聚合，纯事实）
+  s+='\n### 时间去向\n\n';
+  if(r.时间记录.length){
+    s+='| 事项 | 时段 | 时长 |\n|---|---|---|\n';
+    r.时间记录.forEach(x=>{
+      s+='| '+String(x.名称).replace(/\|/g,'/')+' | '+(x.起止.join('、')||'—')+' | '+x.分钟+' 分钟 |\n';
+    });
+  } else s+='今天没有时间记录。\n';
+  // 特殊情况：只陈述客观缺口
+  const notes=[];
+  if(r.未匹配计划项) notes.push(r.未匹配计划项+' 项计划没有对应时间记录（可能没做，或做了没记）。');
+  if(r.总时长分钟===0) notes.push('总时长为 0，检查时间记录是否填了时长。');
+  s+='\n### 特殊情况\n'+(notes.length?('\n'+notes.map(x=>'- '+x).join('\n')+'\n'):'\n无\n');
   const tail=(st.match(/结尾[：:]\s*(.+)/)||[])[1];
   if(tail) s+='\n'+tail.trim()+'\n';
   return s;
