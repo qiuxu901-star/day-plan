@@ -1143,7 +1143,7 @@ function getIntentSystem(){
     const r=db.prepare("SELECT content FROM skills WHERE name=? AND status=?").get('intent-router','active');
     if(r && r.content && r.content.length>100) return r.content;
   }catch(e){}
-  return getPrompts().intent;
+  return '你是意图分类器。按技能 intent-router 的规则输出严格 JSON，判断用户想做什么。';
 }
 // 自由兜底回复：让 Agent 自然接话，不再固定自我介绍
 async function freeReply(message, history){
@@ -1151,7 +1151,7 @@ async function freeReply(message, history){
     const cfg=getAIConfig();
     if(!cfg.base_url||!cfg.api_key) return null;
     let ctx=(history||[]).slice(-10).map(x=>(x.role==='me'?'用户':'助手')+': '+String(x.text||'').slice(0,300)).join('\n');
-    const sys=getPrompts().system||'你是潮汐，用户的时间与精力助手。';
+    const sys=getPrompts().system||'你是潮汐助理，用户的时间与精力管家。';
     const r=await fetch(cfg.base_url.replace(/\/+$/,'')+'/chat/completions',{
       method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.api_key},
       body:JSON.stringify({model:cfg.model,messages:[
@@ -1204,8 +1204,9 @@ try{ db.exec(`CREATE TABLE IF NOT EXISTS prompts (
   key TEXT PRIMARY KEY, content TEXT, updated_at TEXT)`); }catch(e){}
 const DEFAULT_KICKOFF='# 开工答复格式（你可以直接改这段）\n\n数据由代码从任务表实时算出，你改的是\u201c怎么呈现\u201d，不是数据本身。\n固定结构：🔥最关键3件事 → 📋总表 → ⏰延期 → 📌今日 → 🗓近期 → 📋无日期 → 特殊情况。\n规则：只陈述数据里真实存在的；空字段显示空，不脑补；不评价人（不说拖延/低效），只给事实。\n语气：中文、简洁、表格优先。不要写\u201c证据边界\u201d\u201c一个阻塞问题\u201d\u201c认知类型unknown\u201d这类套话。';
 const DEFAULT_WRAP='# 收工答复格式（你可以直接改这段）\n\n数据由代码实时算出。固定结构：一句话小结 → 今日完成清单 → 时间记录条数与合计分钟。\n只陈述事实，不评价、不建议；字段空就说无。';
-const PROMPT_KEYS=['intent','qa','system','strategic','coach','generator','kickoff','wrap'];
-const DEFAULT_PROMPTS={intent:DEFAULT_INTENT, qa:DEFAULT_QA, system:'', strategic:'', coach:'', generator:'', kickoff:DEFAULT_KICKOFF, wrap:DEFAULT_WRAP};
+// 提示词只保留一段系统词；其余能力全部由 Skills 承担（避免同一规则两处写、互相打架）
+const PROMPT_KEYS=['system'];
+const DEFAULT_PROMPTS={system:''};
 function getPrompts(){
   const out=Object.assign({},DEFAULT_PROMPTS);
   try{
@@ -1242,10 +1243,6 @@ function buildAgentSystem(intent, slots){
   const parts=[];
   // 主系统词（套件必装）
   if(pr.system) parts.push(pr.system);
-  // 按意图追加补充提示词
-  if((intent==='start'||intent==='wrap'||intent==='record') && pr.coach) parts.push('【执行教练模式】\n'+pr.coach);
-  if((intent==='qa'||intent==='wrap'||intent==='start') && pr.strategic) parts.push('【战略军师模式】\n'+pr.strategic);
-  if(intent==='create_skill' && pr.generator) parts.push('【技能生成专家】\n'+pr.generator);
   // 按意图加载技能正文（真正让技能参与运行）
   let skillName=INTENT_SKILL[intent]||'';
   if(intent==='record' && slots && slots.target==='task') skillName='task-planning';
@@ -1385,6 +1382,16 @@ async function handle(req,res){
     else return json(res,400,{detail:'未知提示词'});
     audit('api','reset_prompts','prompts','1',k);
     return json(res,200,{ok:true,reset:k});
+  }
+
+  // 删除单段提示词（system 不允许删，它是唯一保留的系统词）
+  if (p.startsWith('/api/prompts/') && method==='DELETE'){
+    if(!auth(req)) return json(res,401,{detail:'未登录'});
+    const k=p.split('/')[3];
+    if(k==='system') return json(res,400,{detail:'系统提示词不能删除'});
+    const r=db.prepare('DELETE FROM prompts WHERE key=?').run(k);
+    audit('api','delete_prompt','prompts','1',k);
+    return json(res,200,{ok:true,deleted:k,changes:r.changes});
   }
 
   // ===== AI 模型配置（需 JWT）=====
@@ -1715,16 +1722,16 @@ async function handle(req,res){
       data.recent=r.created.map(x=>({record_id:x.record_id,table:x.table||intent.slots.target,
         名称:x['任务名称']||x['事项']||x['内容']||''}));
       // 确定性回执：不经过 LLM，杜绝缓冲期/必须守住/完整具体这类自造分析
-      reply=renderRecordResult(r, intent.slots&&intent.slots.target, getPrompts().record||'');
+      reply=renderRecordResult(r, intent.slots&&intent.slots.target, '');
     } else if(intent.intent==='start'){
       // 复刻助手开工答复：确定性计算 + 固定渲染，不再叠 5 层提示词（军师/教练/技能/参考）
       const k=computeKickoff();
       data.top3=k.最关键3件; data.kickoff=k.总表; data.summary={未完成:k.总表.未完成,逾期:k.总表.逾期未完成};
-      reply=renderKickoff(k, getPrompts().kickoff||'');
+      reply=renderKickoff(k, '');
     } else if(intent.intent==='wrap'){
       const rv=computeWrap();
       data.summary=rv;
-      reply=renderWrap(rv, getPrompts().wrap||'');
+      reply=renderWrap(rv, '');
     } else if(intent.intent==='qa' && /APP.?Key|密钥|技能|提示词|模型配置|什么模型|哪个模型|模型名|同步队列|待同步|吊销|生成.{0,4}key/i.test(message)){
       // 保险：系统管理对象不在业务表里，qa 查不到 → 强制走工具
       intent=Object.assign({},intent,{intent:'tool',slots:{tool_call:{tool:'',args:{}}},reason:'qa转tool'});
@@ -1758,7 +1765,7 @@ async function handle(req,res){
         data.answer=reply; data.degraded=true;
       } else {
         if(!getAIConfig().base_url||!getAIConfig().api_key) return json(res,503,{detail:'AI 未配置'});
-        const sys=buildAgentSystem('qa',{__raw:message})+'\n\n'+getPrompts().qa+'\n\n'+nowContext();
+        const sys=buildAgentSystem('qa',{__raw:message})+'\n\n'+nowContext();
         const resp=await callAI([{role:'system',content:sys+'\n\n'+buildContext(message)},{role:'user',content:message}],false);
         const d=await resp.json();
         reply=d.choices?.[0]?.message?.content||'（无返回）';
