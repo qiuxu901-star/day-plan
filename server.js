@@ -1134,6 +1134,31 @@ async function renderWithSkill(intent, slots, facts, fallback, history){
   }catch(e){ return null; }
 }
 
+// 承接上下文重新抽取写入槽位：用户说「需要/好」时，从上文找出真正要记的内容
+async function extractSlotsFromContext(message, history, prevSlots){
+  try{
+    const cfg=getAIConfig();
+    if(!cfg.base_url||!cfg.api_key) return null;
+    const sys='你是数据抽取器。结合对话历史，判断用户这句（可能是「需要/好/是」这类确认）真正要记什么内容。'
+      +'只输出严格 JSON：{"target":"task|time|inbox","items":[{"中文字段名":"值"}]}。'
+      +'task用任务名称/计划日/到期日/优先级，time用事项/日期/开始时间/结束时间/时长，inbox用内容/类型。'
+      +'若用户是在确认上一轮助手提到的事项，就记那件事的完整内容，不是「需要」二字。';
+    const msgs=[{role:'system',content:sys+'\n\n'+nowContext()}]
+      .concat(historyToMessages(history))
+      .concat([{role:'user',content:'当前用户这句：'+message}]);
+    const r=await fetch(cfg.base_url.replace(/\/+$/,'')+'/chat/completions',{
+      method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.api_key},
+      body:JSON.stringify({model:cfg.model,response_format:{type:'json_object'},messages:msgs}),
+      signal:AbortSignal.timeout(20000)
+    });
+    const d=await r.json();
+    const raw=(d.choices?.[0]?.message?.content||'').replace(/```json|```/g,'').trim();
+    const obj=JSON.parse(raw);
+    if(!Array.isArray(obj.items)||!obj.items.length) return null;
+    return {target:obj.target||(prevSlots&&prevSlots.target)||'task',items:obj.items};
+  }catch(e){ return null; }
+}
+
 // 时间/时长规范化：把中文口语转成机器可读格式
 function normClock(v){
   let s=String(v==null?'':v).trim();
@@ -1552,14 +1577,18 @@ async function handle(req,res){
     let reply='', data={}, audit_ids=[];
     if(intent.intent==='record'){
       // 潮汐 Agent 对数据有最大权限：它抽出的 slots 就是最终写入内容，代码不覆盖、不改写。
-      // 仅当它完全没抽出条目时，用原话造一条最小 item，避免用户说的话一条都没记下。
+      // 空 items（如用户只说「需要」承接上一轮）：让 LLM 带完整对话重新抽取真正要记的内容
       if(!intent.slots || !Array.isArray(intent.slots.items) || !intent.slots.items.length){
-        const raw=message.replace(/^(记一下|记录一下|加个任务|今天的计划是|今日计划|今天计划|我的思考|我的想法|思考|想法)\s*[：:]?/,'').trim();
-        const tg=(intent.slots&&intent.slots.target)||inferTarget(raw);
-        const item=tg==='inbox'?{'内容':raw}
-          :tg==='time'?{'事项':raw}
-          :{'任务名称':raw};
-        intent.slots=Object.assign({},intent.slots||{},{target:tg,items:[item]});
+        const extracted=await extractSlotsFromContext(message,b.history,intent.slots);
+        if(extracted && Array.isArray(extracted.items) && extracted.items.length){
+          intent.slots=extracted;
+        } else {
+          // 最后兜底：用原话，避免一条都记不下
+          const raw=message.replace(/^(记一下|记录一下|加个任务|今天的计划是|今日计划|今天计划|我的思考|我的想法|思考|想法)\s*[：:]?/,'').trim();
+          const tg=(intent.slots&&intent.slots.target)||inferTarget(raw);
+          const item=tg==='inbox'?{'内容':raw}:tg==='time'?{'事项':raw}:{'任务名称':raw};
+          intent.slots=Object.assign({},intent.slots||{},{target:tg,items:[item]});
+        }
       }
       const r=agentRecord(intent.slots);
       data.created=r.created;
