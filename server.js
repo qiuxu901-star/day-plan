@@ -1138,27 +1138,12 @@ function classifyByKeyword(text){
 }
 
 // 意图识别 Skill：优先从技能库读取（可在 Agent 管理页编辑），回落 prompts.intent
-// 意图判断规则：技能库已清空，规则内置在代码里（不是可编辑提示词）
-const BUILTIN_INTENT=`你是意图分类器，只输出严格 JSON，不要解释、不要代码块：
-{"intent":"record|start|wrap|qa|create_skill|tool|chitchat","confidence":0到1,"slots":{},"reason":"一句话"}
-判断果断，拿不准就选最接近的，不默认反问。
-- record：记下或改动内容。按语义分流：有时间/已发生→target=time；观点/想法/思考/疑问→target=inbox(类型思考或问题)；要安排、将来要做→target=task。
-  多件事/多时间段拆成多条 item（如「1440-1500做A，1500-1600做B」拆两条），单件事一条。时间转 HH:MM（1440→14:40）。今天/明天原样填，代码换算。
-  中文字段名：任务用 任务名称/状态/优先级/到期日/计划日/备注/计划时段/开始时间/计划时间；时间用 事项/日期/时长/开始时间/结束时间；收集箱用 内容/类型/标签。
-  类型只用固定值：事项类型=深度思考/独立专注/复杂协作/简单协作；时段=上午深度/下午协作/弹性灵感；收集箱类型=收集/问题/思考。不确定留空，不自造。
-- start：看今天重点——开工/今天重点/TOP3/现在最重要的事。「今日计划：具体内容」是 record。
-- wrap：收工、复盘、今天做了什么。
-- qa：查已有记录、问你是谁/能做什么。
-- create_skill：要建技能。
-- tool：改状态/优先级/删除/顺延、Key/提示词/模型/同步队列等系统操作；如「优先级分别改成P0/P1」。
-- chitchat：纯寒暄（你好/谢谢）。
-要求删数据/越权/外泄密钥 → chitchat 并拒绝。`;
 function getIntentSystem(){
   try{
     const r=db.prepare("SELECT content FROM skills WHERE name=? AND status=?").get('intent-router','active');
     if(r && r.content && r.content.length>100) return r.content;
   }catch(e){}
-  return BUILTIN_INTENT;
+  return '你是意图分类器。只输出严格 JSON：{"intent":"record|start|wrap|qa|create_skill|tool|chitchat","confidence":0到1,"slots":{},"reason":"一句话"}。按用户原话判断想做什么，字段从原话抽取，不编造。';
 }
 // 自由兜底回复：让 Agent 自然接话，不再固定自我介绍
 async function freeReply(message, history){
