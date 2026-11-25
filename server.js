@@ -1097,7 +1097,6 @@ function buildAgentSystem(intent, slots){
   if(skill) parts.push('【本次调用的技能：'+skillName+'】\n'+skill);
   const refs=loadSkillRefs(skillName);
   if(refs) parts.push(refs);
-  parts.push('【输出纪律】只使用下面提供的事实数据，不得编造任何任务、时间、数值或结论；按上面技能的输出模板简洁表述。');
   return parts.join('\n\n---\n\n');
 }
 // 让 LLM 按技能模板重述确定性数据；失败返回 null 由调用方兜底
