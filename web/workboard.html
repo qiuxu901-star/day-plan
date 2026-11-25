@@ -918,9 +918,9 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
     </div>
     <div class="agent-quick" id="agentQuick">
       <button data-q="start">⚡ 开工</button>
-      <button data-q="record">＋ 记一笔</button>
       <button data-q="wrap">✓ 收工</button>
-      <button data-q="qa">今天怎么样</button>
+      <button data-q="time">⏱ 时间记录</button>
+      <button data-q="plan">📋 今日计划</button>
     </div>
     <form class="agent-composer" id="agentForm">
       <input id="agentInput" placeholder="说一句话，比如：今天的计划是……" autocomplete="off">
@@ -4003,12 +4003,14 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
         else agentSend(p, p==='开工'?'start':(p==='收工'?'wrap':null));
       };
     });
+    // 快捷输入：点击只把引导词填进输入框，用户补充内容后再发送
+    var QUICK_FILL={start:'开工',wrap:'收工',time:'记录一下 ',plan:'今日计划：'};
     Array.prototype.forEach.call(document.querySelectorAll('#agentQuick button'),function(b){
       b.onclick=function(){
         var q=b.getAttribute('data-q');
-        if(q==='record'){ if(inp){ inp.value='今天的计划是'; inp.focus(); } return; }
-        var map={start:'开工',wrap:'收工',qa:'今天有哪些事'};
-        agentSend(map[q]||b.textContent,q);
+        var fill=QUICK_FILL[q];
+        if(fill!==undefined && inp){ inp.value=fill; inp.focus(); return; }
+        if(inp){ inp.focus(); }
       };
     });
     // 量 topbar 高度写入 flex 基准
