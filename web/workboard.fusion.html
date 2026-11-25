@@ -1303,7 +1303,7 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   <!-- ===== Agent 管理（独立页） ===== -->
   <section class="view" id="view-agentadmin" style="padding:24px;max-width:1100px">
     <div class="panel" style="padding:20px">
-      <div class="panel-head"><h2 style="margin:0 0 6px">Agent 提示词</h2><span class="hint" style="color:var(--muted);font-size:13px">8 段提示词 · 开工/收工格式由代码保证数据准确，改提示词只调呈现</span></div>
+      <div class="panel-head"><h2 style="margin:0 0 6px">Agent 提示词</h2><span class="hint" style="color:var(--muted);font-size:13px">唯一系统提示词 · 能力规则请到下方技能库修改对应 Skill</span></div>
 
       <div id="pmTabs" style="display:flex;gap:8px;flex-wrap:wrap;margin:14px 0"></div>
       <div id="pmDesc" style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6"></div>
@@ -3485,7 +3485,7 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
       $('pmQa').value=p.qa.content||'';
       $('pmIntentMeta').textContent=p.intent.custom?('已自定义 · '+(p.intent.updated_at||'').slice(0,16).replace('T',' ')):'使用默认';
       $('pmQaMeta').textContent=p.qa.custom?('已自定义 · '+(p.qa.updated_at||'').slice(0,16).replace('T',' ')):'使用默认';
-      $('pmSaved').textContent='共 8 段提示词 · 开工/收工 = 代码算数据 + 你写的格式；意图判断以技能库 intent-router 为准';
+      $('pmSaved').textContent='只有一段系统提示词；意图判断/开工/收工/记录的能力都在技能库里';
     }).catch(function(e){ $('pmSaved').textContent='读取失败：'+e.message; });
   }
   function pmFlash(text,bad){
@@ -3493,15 +3493,8 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
     m.textContent=text; m.style.color=bad?'var(--terra)':'var(--sage)';
   }
 
-  var PM_KEYS=[['kickoff','⭐ 开工答复格式','你发「开工」时潮汐的答复样式。数据由代码算准，这段只控制呈现方式；改这里立刻生效，就是你想要的样子'],
-    ['wrap','⭐ 收工答复格式','你发「收工」时的答复样式。同样只控制呈现，数据由代码算'],
-    ['intent','意图识别 · JSON','判断开工/记计划/收工/问答并拆条。注意：实际判断优先用技能库 intent-router，改这里仅作备份'],
-    ['system','主系统词','Agent 的角色与行为准则（影响闲聊、问答语气）'],
-    ['qa','问答词','基于记录回答问题时的语气与规则'],
-    ['strategic','军师模式','目标优先级、取舍判断（仅问答时可能用到）'],
-    ['coach','教练模式','推进/拆解（仅问答时可能用到）'],
-    ['generator','技能生成','把可重复流程写成 SKILL.md 的元提示词']];
-  var pmCur='kickoff', pmData={};
+  var PM_KEYS=[['system','⭐ 系统提示词（唯一）','潮汐助理的总纲：怎么听懂你、去哪张表、信息不全怎么办、回执怎么写。具体能力规则都在下方「技能库」的各个 Skill 里，这里只写总纲，不要重复技能细节。改这里保存即生效。']];
+  var pmCur='system', pmData={};
   function pmSelect(k){
     pmCur=k;
     var meta=pmData[k]||{};
