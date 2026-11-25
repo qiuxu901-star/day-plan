@@ -979,72 +979,31 @@ function renderWrap(r, style){
 
 // 把 LLM 槽位安全落地：白名单 → 枚举归一 → 必填校验
 function agentRecord(slots){
+  // 潮汐 Agent 对数据拥有最大权限：只受"表真实存在"这一物理边界约束，
+  // 不再有字段白名单、枚举强制、必填拦截、默认值硬塞 —— 写什么由 Agent 决定。
   const target=(slots&&slots.target)||'task';
-  if(!FIELD_WHITELIST[target]) return {created:[],errors:['不支持写入该类型']};
-  let items=(slots&&slots.items)||[];
+  if(!TABLES.includes(target)) return {created:[],errors:['表不存在：'+target]};
+  const items=(slots&&slots.items)||[];
   if(!items.length) return {created:[],errors:['没有可写入的条目']};
-  // LLM 有时把一句话拆成多个只含单字段的 item（title/date/time/person），先合并成一条
-  const NAME_KEY={task:'任务名称',time:'事项',inbox:'内容',review:'日期'}[target]||'任务名称';
-  const hasName=items.some(x=>x && Object.keys(x).some(k=>FIELD_ALIAS[k]===NAME_KEY || k===NAME_KEY));
-  // 多条且各自带时间字段 = 用户口述的多段计划，必须保留为多条（不能被合并逻辑压成一条）
-  const TIME_KEYS=['开始时间','计划时间','计划时段','结束时间','time','start','end'];
-  const multiSegment=items.length>1 && items.every(x=>x && typeof x==='object' &&
-    Object.keys(x).some(k=>TIME_KEYS.includes(k)||TIME_KEYS.includes(FIELD_ALIAS[k])));
-  if(!hasName && items.length>1 && !multiSegment){
-    const merged={};
-    items.forEach(x=>{ if(x && typeof x==='object') Object.assign(merged, x); });
-    items=[merged];
-  }
   const created=[], errors=[];
   items.forEach((item,i)=>{
+    if(!item || typeof item!=='object'){ errors.push('第'+(i+1)+'条不是对象，未写入'); return; }
+    // 字段名别名照常映射（方便 Agent 用英文键），但不再按白名单过滤：
+    // 底层 addRecord 只会写入该表真实存在的列，不存在的列由数据库层天然忽略。
     const clean={};
     Object.entries(item).forEach(([k0,v])=>{
-      let k=FIELD_ALIAS[k0]||k0;   // 英文键/别名 → 中文字段名
-      // task 表没有「结束时间」字段：LLM 抽出的 end/结束时间 归到「计划时间」承载区间
-      if(target==='task' && (k==='结束时间'||k0==='end'||k0==='计划结束')) k='计划时间';
-      if(!FIELD_WHITELIST[target].includes(k) || v===null || v===undefined) return;
-      let val=String(v).trim();
-      // 任务表时间字段统一规范为 HH:MM（1440→14:40、下午2点→14:00）
-      if(target==='task' && ['开始时间','计划时间','计划时段','实际时段'].includes(k)) val=normClock(val);
-      if(k==='状态' && !STATUS_ENUM.includes(val)) val='待办';
-      if(k==='优先级' && !PRIORITY_ENUM.includes(val)) val='P2';
-      // 类型只用固定枚举，自造分类一律留空（不让「创造输出/梳理分析」入库）
-      const ENUMS={'事项类型':['深度思考','独立专注','复杂协作','简单协作'],
-        时段:['上午深度','下午协作','弹性灵感'],类型:['收集','问题','思考'],
-        主线执行:['主线任务','执行任务']};
-      if(ENUMS[k] && val && !ENUMS[k].includes(val)) val='';
-      if(val==='今天') val=target==='time'?dateToday():dateToday();
-      if(val==='明天') val=dateTomorrow();
-      clean[k]=val;
+      if(v===null||v===undefined) return;
+      clean[FIELD_ALIAS[k0]||k0]=v;
     });
-    if(target==='time'){
-      ['开始时间','结束时间'].forEach(k=>{ if(clean[k]) clean[k]=normClock(clean[k]); });
-      if(clean['时长']) clean['时长']=normDuration(clean['时长']);
-      if(clean['日期'] && !/T/.test(String(clean['日期']))) clean['日期']=String(clean['日期']).slice(0,10)+'T00:00:00Z';
-      // 去重（T03）：同日期+事项+起止时间已有记录则更新而非新增
-      if(clean['事项']){
-        const d=String(clean['日期']||'').slice(0,10);
-        const dup=db.prepare("SELECT record_id FROM time WHERE 事项=? AND substr(日期,1,10)=? AND COALESCE(开始时间,'')=? AND COALESCE(结束时间,'')=? LIMIT 1")
-          .get(clean['事项'], d, clean['开始时间']||'', clean['结束时间']||'');
-        if(dup){ updateRecord('time', dup.record_id, clean, 'agent'); created.push(Object.assign({table:'time',dedup:true},clean,{record_id:dup.record_id})); return; }
-      }
-    }
-    if(target==='task'){
-      if(!clean['任务名称']){ errors.push('第'+(i+1)+'条缺少任务名称，未写入'); return; }
-      if(!clean['状态']) clean['状态']='待办';
-      if(!clean['优先级']) clean['优先级']='P2';
-      if(!clean['来源']) clean['来源']='手动';
-      if(!clean['计划日']) clean['计划日']=dateTomorrow()+'T00:00:00Z';
-      if(!clean['到期日']) clean['到期日']=clean['计划日'];
-    } else if(target==='time'){
-      if(!clean['事项']){ errors.push('第'+(i+1)+'条缺少事项，未写入'); return; }
-      if(!clean['日期']) clean['日期']=dateToday()+'T00:00:00Z';
-    } else if(target==='inbox'){
-      if(!clean['内容']){ errors.push('第'+(i+1)+'条缺少内容，未写入'); return; }
-      if(!clean['记录日期']) clean['记录日期']=dateToday()+'T00:00:00Z';
-    } else if(target==='review'){
-      if(!clean['日期']) clean['日期']=dateToday()+'T00:00:00Z';
-    }
+    // 时间格式规范化：中文/紧凑时间转 HH:MM、时长转分钟（用户已确认的能力，非权限限制）
+    ['开始时间','结束时间','计划时间','计划时段','实际时段'].forEach(k=>{
+      if(clean[k]!==undefined && clean[k]!==null) clean[k]=normClock(clean[k]);
+    });
+    if(clean['时长']!==undefined && clean['时长']!==null) clean['时长']=normDuration(clean['时长']);
+    if(clean['日期'] && !/T/.test(String(clean['日期']))) clean['日期']=String(clean['日期']).slice(0,10)+'T00:00:00Z';
+    if(clean['计划日'] && !/T/.test(String(clean['计划日']))) clean['计划日']=String(clean['计划日']).slice(0,10)+'T00:00:00Z';
+    if(clean['到期日'] && !/T/.test(String(clean['到期日']))) clean['到期日']=String(clean['到期日']).slice(0,10)+'T00:00:00Z';
+
     const r=addRecord(target, clean, 'agent');
     created.push(Object.assign({table:target}, clean, {record_id:r.record_id}));
     const d=JSON.stringify({user_message:'',parsed_slots:clean,created:[{table:target,record_id:r.record_id}],undone:0});
@@ -1689,29 +1648,13 @@ async function handle(req,res){
     // 低置信度不再拦截：识别成 record 就照常写入，字段有白名单+类型校验兜底，无需反问用户
     let reply='', data={}, audit_ids=[];
     if(intent.intent==='record'){
-      // 确定性校正：原话含多个时间段/序号时，按时间拆成多条，防止 LLM 只抽开始时间/把多件事压成一条
-      if(intent.slots && (intent.slots.target==='task'||intent.slots.target==='time')){
-        const segs=parseSegments(message.replace(/^(记一下|记录一下|加个任务|今天的计划是|今日计划|今天计划)\s*[：:]?/,'').trim());
-        const hasClock=segs.some(x=>x['开始时间']||x['结束时间']||x['计划时段']);
-        if(hasClock){
-          const adapted=segs.map(x=>{
-            if(intent.slots.target==='time'){
-              const o=Object.assign({},x);
-              o['事项']=o['任务名称']; delete o['任务名称']; delete o['计划时间']; delete o['计划时段'];
-              if(!o['日期']) o['日期']=dateToday();
-              return o;
-            }
-            return x;
-          });
-          intent.slots=Object.assign({},intent.slots,{items:adapted});
-        }
-      }
-      // 兜底：意图判成 record 但 LLM 没抽出 items 时，用原话造最小 item 按语义分流，绝不空手而归
+      // 潮汐 Agent 对数据有最大权限：它抽出的 slots 就是最终写入内容，代码不覆盖、不改写。
+      // 仅当它完全没抽出条目时，用原话造一条最小 item，避免用户说的话一条都没记下。
       if(!intent.slots || !Array.isArray(intent.slots.items) || !intent.slots.items.length){
-        const raw=message.replace(/^(记一下|记录一下|我的思考|我的想法|思考|想法)\s*[：:]?/,'').trim();
+        const raw=message.replace(/^(记一下|记录一下|加个任务|今天的计划是|今日计划|今天计划|我的思考|我的想法|思考|想法)\s*[：:]?/,'').trim();
         const tg=(intent.slots&&intent.slots.target)||inferTarget(raw);
-        const item=tg==='inbox'?{'内容':raw,'类型':/思考|想法|观点/.test(message)?'思考':'收集'}
-          :tg==='time'?{'事项':raw,'日期':dateToday()}
+        const item=tg==='inbox'?{'内容':raw}
+          :tg==='time'?{'事项':raw}
           :{'任务名称':raw};
         intent.slots=Object.assign({},intent.slots||{},{target:tg,items:[item]});
       }
