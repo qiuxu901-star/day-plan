@@ -260,129 +260,18 @@ function toolAudit(action, detail){
   return db.prepare('SELECT last_insert_rowid() id').get().id;
 }
 // 工具结果 → 人类可读文本（确定性，不经 LLM）
+// 工具结果不再套固定话术：原样交给 LLM，由它按 system 提示词表达
 function formatToolResult(tool, r){
-  if(!r) return '工具执行完毕，无返回内容。';
-  if(r.ok===false) return '执行失败：'+(r.error||'未知错误');
-  try{
-    switch(tool){
-      case 'list_records': {
-        const rows=r.items||[];
-        if(!rows.length) return `${r.table} 没有匹配的记录（共 ${r.total} 条）。`;
-        const keys=Object.keys(rows[0]).filter(k=>!k.startsWith('_')).slice(0,6);
-        const lines=rows.slice(0,30).map(x=>keys.map(k=>`${k}: ${x[k]??''}`).join(' / '));
-        return `${r.table} 命中 ${r.total} 条（显示前 ${lines.length} 条）\n`+lines.join('\n');
-      }
-      case 'sync_status': return `同步队列：待处理 ${r.pending} 条`+(r.by_table&&r.by_table.length?'\n'+r.by_table.map(x=>`${x.table_name} ${x.op}: ${x.n}`).join('\n'):'');
-      case 'list_keys': return (r.length?r:[]).map(k=>`${k.id} | ${k.scope} | ${k.revoked?'已吊销':'有效'} | ${k.note||'无备注'}`).join('\n')||'当前没有 APP Key。';
-      case 'list_skills': return (r||[]).map(s=>`${s.name} | ${s.description||''} | 来源 ${s.origin||'-'}`).join('\n')||'当前没有技能。';
-      case 'get_skill': return `【${r.name}】${r.description||''}\n\n${r.content||''}`;
-      case 'create_key': return `已生成 Key（${r.scope}）：${r.key}\n请立即保存，之后不再显示。id=${r.id}`;
-      case 'create_skill': return `已创建技能「${r.name}」(id=${r.id})。`;
-      case 'update_skill': return `技能已更新（${r.updated} 个字段）。`;
-      case 'delete_skill': return '技能已删除。';
-      case 'get_ai_config': return `当前模型：${r.model}\n接口：${r.base_url}\n上下文预算：${r.context_max}\n密钥：${r.api_key_masked||'未设置'}\n配置来源：${r.source}`;
-      case 'set_ai_config': return '模型配置已更新：'+JSON.stringify(r);
-      case 'test_ai': return `连接${r.ok?'成功':'失败'}（${r.ms||''}ms）：${r.reply||r.error||''}`;
-      case 'list_prompts': return Object.keys(r).map(k=>`${k}: ${r[k].custom?'已自定义':'默认'}`).join('\n');
-      case 'get_prompt': return `【${r.key}】\n${r.content}`;
-      case 'set_prompt': return `提示词「${r.key}」已保存，立即生效。`;
-      case 'reset_prompt': return `提示词已恢复：${r.reset}`;
-      case 'mark_done':
-        if(r.need_choose) return '找到多条匹配，请说具体是哪一条：\n'+r.candidates.map((c,i)=>`${i+1}. ${c.任务名称}（${c.状态}）`).join('\n');
-        if(r.already_done) return `「${r.任务名称}」本来就是已完成。`;
-        return `✓ 已把「${r.任务名称}」标记为已完成（原状态：${r.old_status}）。可撤销。`;
-      case 'find_task': return (r.items||[]).map(x=>`${x.record_id} | ${x.任务名称} | ${x.状态}`).join('\n')||'没找到匹配的任务。';
-      case 'add_record': return `已新增记录（${r.record_id}）。`;
-      case 'update_record': return `已更新 ${r.updated} 个字段（${r.record_id}）。`;
-      case 'delete_record': return `记录已删除，可用撤销恢复。`;
-      case 'start_day': return `今日关键 3 件：\n`+(r.关键3件||[]).map((x,i)=>`${i+1}. [${x.优先级}] ${x.任务} (${x.分数}分)`).join('\n')+`\n未完成 ${r.未完成}，逾期 ${r.逾期}`;
-      case 'review_day': return `复盘：${r.一句话||''}`;
-      case 'search_history': return r.数据||'未命中记录。';
-      default: return JSON.stringify(r).slice(0,1500);
-    }
-  }catch(e){ return JSON.stringify(r).slice(0,1500); }
+  if(r===undefined||r===null) return '';
+  try{ return JSON.stringify(r); }catch(e){ return String(r); }
 }
 
-// 从对话历史里找「刚记的那几条」：取最近一条带 recent 的 AI 消息
-function recentFromHistory(history){
-  const h=Array.isArray(history)?history:[];
-  for(let i=h.length-1;i>=0;i--){
-    if(h[i] && h[i].role==='ai' && Array.isArray(h[i].recent) && h[i].recent.length) return h[i].recent;
-  }
-  return [];
-}
-// 指代解析：用户说「这两条/刚才的/刚记的」→ 指向 recent；否则空
-function refersRecent(text){
-  return /(刚才|刚记|这两?条|上面|那两?条|它们|这两个|前两?条)/.test(String(text||''));
-}
-// 批量改最近几条记录的字段（优先级/状态/日期/时间等），只动明确的字段
-function updateRecent(history, fields){
-  const targets=recentFromHistory(history);
-  if(!targets.length) return {error:'最近没有可修改的记录，先告诉我改哪一条。'};
-  const clean={};
-  Object.entries(fields||{}).forEach(([k,v])=>{ if(v!==undefined&&v!==null&&String(v).trim()) clean[k]=String(v).trim(); });
-  if(!Object.keys(clean).length) return {error:'没说要改什么字段。'};
-  const out=[];
-  const before=[];
-  targets.forEach(t=>{
-    const tbl=TOOL_TABLES.includes(t.table)?t.table:'task';
-    const cur=db.prepare(`SELECT * FROM ${q(tbl)} WHERE record_id=?`).get(t.record_id);
-    if(!cur){ out.push({record_id:t.record_id,error:'记录不存在'}); return; }
-    const oldFields={}; Object.keys(clean).forEach(k=>oldFields[k]=cur[k]);
-    before.push({table:tbl,record_id:t.record_id,fields:oldFields});
-    const r=updateRecord(tbl,t.record_id,clean,'agent');
-    out.push({record_id:t.record_id,名称:t['名称']||cur['任务名称']||'',updated:r?r.updated:0});
-  });
-  audit('agent','update_recent','agent_tool','',JSON.stringify({fields:clean,targets:out.map(x=>x.record_id),before}));
-  return {updated:out,fields:clean};
-}
-
-// 从「改优先级」消息里抽取 事项片段 + 目标级别，按顺序一一对应，去任务表模糊匹配更新。
-// 支持：①「把A、B改成P0」(同值) ②「A改P0，B改P1」/「A和B优先级分别为P0和P1」(分别)。
-function matchAndSetPriority(message){
-  const t=String(message||'');
-  const levels=[...t.matchAll(/P\s*([012])\s*级?/gi)].map(m=>'P'+m[1]);
-  if(!levels.length) return null;
-  const distinct=[...new Set(levels)];
-  // 去掉引导语和优先级描述，剩下的按标点切成事项片段
-  let body=t.replace(/^(把|请|帮|帮我|将|优先级)/g,'')
-    .replace(/(优先级|分别|依次|各自)?\s*(修改|改|设为|设|定|调整|调为|改成|变为)\s*(为)?\s*P?\s*[012]\s*级?/gi,'')
-    .replace(/P\s*[012]\s*级?/gi,'').replace(/[，,、；;。\s]+/g,' ').trim();
-  // 用时间段或标点切分事项
-  let parts=body.split(/\s+/).filter(x=>x.length>=2);
-  // 若消息里带「1430-1700」这类时间段，用它们锚定事项边界
-  const segs=[...t.matchAll(/(\d{3,4}\s*[-—~至到]\s*\d{3,4})/g)].map(m=>m[1]);
-  if(segs.length>=2){
-    parts=segs.map(s=>{
-      const i=t.indexOf(s); const next=segs.find(q=>t.indexOf(q)>i);
-      return t.slice(i,next?t.indexOf(next):t.length)
-        .replace(/\d{3,4}\s*[-—~至到]\s*\d{3,4}/g,'')
-        .replace(/P\s*[012]\s*级?/gi,'').replace(/优先级|分别|依次|修改|改|设为|为/g,'')
-        .replace(/[，,、；;。\s]+/g,' ').trim();
-    }).filter(x=>x.length>=2);
-  }
-  if(!parts.length) return null;
-  // 目标级别：分别模式按位置取，否则全用同一个值
-  const perItem=levels.length===parts.length && distinct.length>1;
-  const updated=[],before=[];
-  parts.forEach((p,i)=>{
-    // 归一化关键词：取最长的中文片段
-    const words=p.replace(/[：:（）()【】「」]/g,' ').split(/\s+/).filter(w=>w.length>=2);
-    const term=words.sort((a,b)=>b.length-a.length)[0]||p;
-    if(!term) return;
-    const rows=db.prepare("SELECT record_id,任务名称,优先级 FROM task WHERE 状态!='已完成' AND (任务名称 LIKE ? OR 事项二 LIKE ?) LIMIT 5")
-      .all('%'+term+'%','%'+term+'%');
-    if(!rows.length){ updated.push({关键词:term,error:'未匹配到任务'}); return; }
-    const target=perItem?levels[i]:distinct[0];
-    const r=rows[0];
-    const old={'优先级':r['优先级']};
-    before.push({table:'task',record_id:r['record_id'],fields:old});
-    updateRecord('task',r['record_id'],{'优先级':target},'agent');
-    updated.push({record_id:r['record_id'],名称:r['任务名称'],关键词:term,优先级:target});
-  });
-  if(!updated.length) return null;
-  audit('agent','update_priority','agent_tool','',JSON.stringify({updated,before}));
-  return {updated,before,perItem};
+// 工具执行结果交给 LLM 按 system 提示词表达；失败才用 JSON 原文兜底
+async function renderToolReply(tool, result, message){
+  const raw=formatToolResult(tool,result);
+  const rendered=await renderWithSkill('tool',{__raw:message},
+    {工具:tool,执行结果:result}, raw);
+  return rendered||raw;
 }
 
 // 确定性关键词路由：常见系统管理请求直接映射工具，不依赖 LLM 选择
@@ -649,9 +538,8 @@ function historySearch(question){
     const lines=rows.map(r=>cs.map(k=>`${k}:${r[k]??''}`).join(' | '));
     parts.push(`【${LABELS[t]} 命中${rows.length}条】\n${lines.join('\n')}`);
   });
-  const head=`【历史查询条件】日期 ${ps.dateFrom||'不限'}~${ps.dateTo||'不限'}｜关键词 ${ps.keyword||'无'}｜查表 ${ps.tables.join('/')}\n`;
-  const body=parts.length?parts.join('\n\n'):'【未命中任何记录】可适当放宽条件或说明无数据，不得编造。';
-  return {text:(head+body).slice(0,30000), found, params:ps};
+  // 只向 LLM 提供原始数据，不写"不得编造/可放宽条件"这类指令式文案——避免被当成回复原样说出
+  return {text:parts.join('\n\n').slice(0,30000), found, params:ps};
 }
 function buildContext(question){
   const r=historySearch(question);
@@ -1593,7 +1481,7 @@ async function handle(req,res){
       try{
         const mr=await executeTool('mark_done',{keyword:kw});
         const tdata={tool:'mark_done',result:mr};
-        const treply=formatToolResult('mark_done',mr);
+        const treply=await renderToolReply('mark_done',mr,message);
         return json(res,200,{ok:true,intent:'tool',confidence:1,reply:treply,data:tdata,
           audit_ids:mr.audit_id?[mr.audit_id]:[],undoable:!!mr.audit_id});
       }catch(e){ return json(res,200,{ok:false,intent:'tool',reply:'标记完成失败：'+String(e.message||e).slice(0,150)}); }
@@ -1705,7 +1593,7 @@ async function handle(req,res){
         try{
           const result=await executeTool(tc.tool,tc.args||{});
           data={tool:tc.tool,result};
-          reply=formatToolResult(tc.tool,result);
+          reply=await renderToolReply(tc.tool,result,message);
           return json(res,200,{ok:true,intent:'tool',confidence:conf,reply,data,audit_ids:result.audit_id?[result.audit_id]:[],undoable:!!result.audit_id});
         }catch(e){ reply='工具执行失败：'+String(e.message||e).slice(0,150); return json(res,200,{ok:false,intent:'tool',reply,data:{}}); }
       }
@@ -1749,7 +1637,7 @@ async function handle(req,res){
         const result=await executeTool(tc.tool,tc.args||{});
         data={tool:tc.tool,result};
         // 工具结果直接格式化为可读文本，禁止 LLM 重写（否则会忽略事实自由发挥）
-        reply=formatToolResult(tc.tool,result);
+        reply=await renderToolReply(tc.tool,result,message);
         return json(res,200,{ok:true,intent:'tool',confidence:conf,reply,data,audit_ids:result.audit_id?[result.audit_id]:[],undoable:!!result.audit_id});
       }catch(e){
         return json(res,200,{ok:false,intent:'tool',reply:'工具执行失败：'+String(e.message||e).slice(0,150)});
