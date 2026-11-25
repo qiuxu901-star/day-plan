@@ -1258,12 +1258,12 @@ async function renderWithSkill(intent, slots, facts, fallback){
   try{
     const cfg=getAIConfig();
     if(!cfg.base_url||!cfg.api_key) return null;
-    const sys=buildAgentSystem(intent, slots);
+    const sys=getPrompts().system||'你是潮汐助理。';
     const r=await fetch(cfg.base_url.replace(/\/+$/,'')+'/chat/completions',{
       method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.api_key},
       body:JSON.stringify({model:cfg.model,messages:[
         {role:'system',content:sys+'\n\n'+nowContext()},
-        {role:'user',content:'以下是已从数据库核验的事实数据（JSON），请严格据此按技能模板输出；不得新增任何事实：\n'+JSON.stringify(facts,null,1)+'\n\n用户原话：'+String(slots&&slots.__raw||'')}
+        {role:'user',content:'已核实的事实数据（JSON）：\n'+JSON.stringify(facts,null,1)+'\n\n用户原话：'+String(slots&&slots.__raw||'')+'\n\n请根据系统提示词，就这些事实回复用户。'}
       ]}),
       signal:AbortSignal.timeout(20000)
     });
@@ -1721,17 +1721,25 @@ async function handle(req,res){
       // 回传刚记条目的元信息，前端存进 history，供下一句「把这两条改成P0」指代
       data.recent=r.created.map(x=>({record_id:x.record_id,table:x.table||intent.slots.target,
         名称:x['任务名称']||x['事项']||x['内容']||''}));
-      // 确定性回执：不经过 LLM，杜绝缓冲期/必须守住/完整具体这类自造分析
-      reply=renderRecordResult(r, intent.slots&&intent.slots.target, '');
+      // 由大模型按 system 提示词自由生成回复；仅在 AI 不可用时用原始事实兜底
+      const fallback='已记下 '+r.created.length+' 条。';
+      const rendered=await renderWithSkill('record',Object.assign({__raw:message},intent.slots||{}),
+        {写入结果:r.created,未写入:r.errors},fallback);
+      reply=rendered||fallback;
     } else if(intent.intent==='start'){
       // 复刻助手开工答复：确定性计算 + 固定渲染，不再叠 5 层提示词（军师/教练/技能/参考）
       const k=computeKickoff();
       data.top3=k.最关键3件; data.kickoff=k.总表; data.summary={未完成:k.总表.未完成,逾期:k.总表.逾期未完成};
-      reply=renderKickoff(k, '');
+      const fallback='今天重点：'+(k.最关键3件.map(x=>x.任务).join('、')||'无');
+      const rendered=await renderWithSkill('start',{__raw:message},
+        {日期:k.日期,星期:k.星期,总表:k.总表,最关键3件:k.最关键3件,延期事项:k.延期事项,今日事项:k.今日事项,近期事项:k.近期事项,无日期待办:k.无日期待办,依据:k.依据},fallback);
+      reply=rendered||fallback;
     } else if(intent.intent==='wrap'){
       const rv=computeWrap();
       data.summary=rv;
-      reply=renderWrap(rv, '');
+      const fallback=rv.一句话;
+      const rendered=await renderWithSkill('wrap',{__raw:message},rv,fallback);
+      reply=rendered||fallback;
     } else if(intent.intent==='qa' && /APP.?Key|密钥|技能|提示词|模型配置|什么模型|哪个模型|模型名|同步队列|待同步|吊销|生成.{0,4}key/i.test(message)){
       // 保险：系统管理对象不在业务表里，qa 查不到 → 强制走工具
       intent=Object.assign({},intent,{intent:'tool',slots:{tool_call:{tool:'',args:{}}},reason:'qa转tool'});
