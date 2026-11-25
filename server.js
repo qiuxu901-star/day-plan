@@ -869,7 +869,11 @@ function renderWrap(r, style){
 function agentRecord(slots){
   // 潮汐 Agent 对数据拥有最大权限：只受"表真实存在"这一物理边界约束，
   // 不再有字段白名单、枚举强制、必填拦截、默认值硬塞 —— 写什么由 Agent 决定。
-  const target=(slots&&slots.target)||'task';
+  // Agent 可能用中文表名表达，映射到真实表；"最大权限"下只做名称翻译，不改它的判断
+  const TABLE_NAME_CN={任务:'task',任务表:'task',时间:'time',时间记录:'time',收集:'inbox',收集箱:'inbox',
+    复盘:'review',周计划:'week',阶段:'milestone',日志:'log',留痕:'log',子任务:'subtask'};
+  let target=(slots&&slots.target)||'task';
+  if(TABLE_NAME_CN[target]) target=TABLE_NAME_CN[target];
   if(!TABLES.includes(target)) return {created:[],errors:['表不存在：'+target]};
   const items=(slots&&slots.items)||[];
   if(!items.length) return {created:[],errors:['没有可写入的条目']};
