@@ -1633,7 +1633,8 @@ async function handle(req,res){
     } else if(b.preset_intent && ['record','start','wrap','qa'].includes(b.preset_intent)){
       // 快捷指令：跳过 LLM，纯确定性
       intent={intent:b.preset_intent,confidence:1,slots:b.slots||{},reason:'快捷指令'};
-      if(b.preset_intent==='record'){
+      if(b.preset_intent==='record' && !(b.slots && Array.isArray(b.slots.items) && b.slots.items.length)){
+        // 只有前端没给结构化 slots 时，才用原话造一条；给了就以 Agent 的判断为准
         const qm=message.replace(/^(今天的计划是|记一下|记录一下|加个任务|新增)/,'').replace(/^[：:，,\s]+/,'').trim();
         intent.slots={target:'task',items:[{'任务名称':qm||message}]};
       }
