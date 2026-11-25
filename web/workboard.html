@@ -3936,12 +3936,10 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
           return;
         }
         var html=mdToHtml(r.reply||'');
-        if(r.data && r.data.tool){
-          html+='<div class="tool-trace"><span class="tt-label">⚙ 已调用 '+escHtml(r.data.tool)+'</span>';
-          if(r.undoable && r.audit_ids && r.audit_ids.length){
-            html+='<button class="tt-undo" data-audit="'+escHtml(r.audit_ids[0])+'">撤销</button>';
-          }
-          html+='</div>';
+        // 不再显示「已调用 XX」工具标签——输出完全由提示词决定，不暴露内部动作
+        // 仅在有可撤销操作时显示一个干净的撤销按钮
+        if(r.undoable && r.audit_ids && r.audit_ids.length){
+          html+='<div class="tool-trace"><button class="tt-undo" data-audit="'+escHtml(r.audit_ids[0])+'">撤销</button></div>';
         }
         if(r.data && r.data.top3 && r.data.top3.length){
           html+='<div class="agent-top3">'+r.data.top3.map(function(t){
