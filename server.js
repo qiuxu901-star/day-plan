@@ -267,10 +267,10 @@ function formatToolResult(tool, r){
 }
 
 // 工具执行结果交给 LLM 按 system 提示词表达；失败才用 JSON 原文兜底
-async function renderToolReply(tool, result, message){
+async function renderToolReply(tool, result, message, history){
   const raw=formatToolResult(tool,result);
   const rendered=await renderWithSkill('tool',{__raw:message},
-    {工具:tool,执行结果:result}, raw);
+    {工具:tool,执行结果:result}, raw, history);
   return rendered||raw;
 }
 
@@ -1020,7 +1020,7 @@ async function classifyIntent(message, history){
   const ctxMax=cfg.context_max;
   if(ctx.length>ctxMax) ctx=ctx.slice(-ctxMax);
   const messages=[
-    {role:'system',content:getIntentSystem()+'\n\n'+nowContext()},
+    {role:'system',content:getIntentSystem()+'\n\n'+nowContext()+'\n\n【承接上文】若当前输入是「需要/好/是/对/可以/来一个」这类简短确认或指代，结合近期对话判断它延续的是哪一轮意图，按那个意图处理，不要当成独立的新请求或闲聊。'},
     {role:'user',content:(ctx?('近期对话：\n'+ctx+'\n\n'):'')+'当前输入：'+message}
   ];
   try{
@@ -1100,17 +1100,28 @@ function buildAgentSystem(intent, slots){
   return parts.join('\n\n---\n\n');
 }
 // 让 LLM 按技能模板重述确定性数据；失败返回 null 由调用方兜底
-async function renderWithSkill(intent, slots, facts, fallback){
+// 对话历史 → OpenAI 多轮 messages（前端 role: me/ai → user/assistant）
+function historyToMessages(history, limit){
+  const out=[];
+  (Array.isArray(history)?history:[]).slice(-(limit||12)).forEach(x=>{
+    if(!x||!x.text) return;
+    const role=(x.role==='me')?'user':(x.role==='ai')?'assistant':null;
+    if(role) out.push({role,content:String(x.text).slice(0,2000)});
+  });
+  return out;
+}
+async function renderWithSkill(intent, slots, facts, fallback, history){
   try{
     const cfg=getAIConfig();
     if(!cfg.base_url||!cfg.api_key) return null;
     const sys=getPrompts().system||'你是潮汐助理。';
+    // 真正的多轮：历史作为 user/assistant 消息传入，当前事实与话作为最后一轮 user
+    const msgs=[{role:'system',content:sys+'\n\n'+nowContext()}]
+      .concat(historyToMessages(history))
+      .concat([{role:'user',content:'已核实的事实数据（JSON）：\n'+JSON.stringify(facts,null,1)+'\n\n用户原话：'+String(slots&&slots.__raw||'')+'\n\n请根据系统提示词，就这些事实回复用户。'}]);
     const r=await fetch(cfg.base_url.replace(/\/+$/,'')+'/chat/completions',{
       method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.api_key},
-      body:JSON.stringify({model:cfg.model,messages:[
-        {role:'system',content:sys+'\n\n'+nowContext()},
-        {role:'user',content:'已核实的事实数据（JSON）：\n'+JSON.stringify(facts,null,1)+'\n\n用户原话：'+String(slots&&slots.__raw||'')+'\n\n请根据系统提示词，就这些事实回复用户。'}
-      ]}),
+      body:JSON.stringify({model:cfg.model,messages:msgs}),
       signal:AbortSignal.timeout(20000)
     });
     const d=await r.json();
@@ -1480,7 +1491,7 @@ async function handle(req,res){
       try{
         const mr=await executeTool('mark_done',{keyword:kw});
         const tdata={tool:'mark_done',result:mr};
-        const treply=await renderToolReply('mark_done',mr,message);
+        const treply=await renderToolReply('mark_done',mr,message,b.history);
         return json(res,200,{ok:true,intent:'tool',confidence:1,reply:treply,data:tdata,
           audit_ids:mr.audit_id?[mr.audit_id]:[],undoable:!!mr.audit_id});
       }catch(e){ return json(res,200,{ok:false,intent:'tool',reply:'标记完成失败：'+String(e.message||e).slice(0,150)}); }
@@ -1555,7 +1566,7 @@ async function handle(req,res){
       // 由大模型按 system 提示词自由生成回复；仅在 AI 不可用时用原始事实兜底
       const fallback='已记下 '+r.created.length+' 条。';
       const rendered=await renderWithSkill('record',Object.assign({__raw:message},intent.slots||{}),
-        {写入结果:r.created,未写入:r.errors},fallback);
+        {写入结果:r.created,未写入:r.errors},fallback,b.history);
       reply=rendered||fallback;
     } else if(intent.intent==='start'){
       // 复刻助手开工答复：确定性计算 + 固定渲染，不再叠 5 层提示词（军师/教练/技能/参考）
@@ -1563,13 +1574,13 @@ async function handle(req,res){
       data.top3=k.最关键3件; data.kickoff=k.总表; data.summary={未完成:k.总表.未完成,逾期:k.总表.逾期未完成};
       const fallback='今天重点：'+(k.最关键3件.map(x=>x.任务).join('、')||'无');
       const rendered=await renderWithSkill('start',{__raw:message},
-        {日期:k.日期,星期:k.星期,总表:k.总表,最关键3件:k.最关键3件,延期事项:k.延期事项,今日事项:k.今日事项,近期事项:k.近期事项,无日期待办:k.无日期待办,依据:k.依据},fallback);
+        {日期:k.日期,星期:k.星期,总表:k.总表,最关键3件:k.最关键3件,延期事项:k.延期事项,今日事项:k.今日事项,近期事项:k.近期事项,无日期待办:k.无日期待办,依据:k.依据},fallback,b.history);
       reply=rendered||fallback;
     } else if(intent.intent==='wrap'){
       const rv=computeWrap();
       data.summary=rv;
       const fallback=rv.一句话;
-      const rendered=await renderWithSkill('wrap',{__raw:message},rv,fallback);
+      const rendered=await renderWithSkill('wrap',{__raw:message},rv,fallback,b.history);
       reply=rendered||fallback;
     } else if(intent.intent==='qa' && /APP.?Key|密钥|技能|提示词|模型配置|什么模型|哪个模型|模型名|同步队列|待同步|吊销|生成.{0,4}key/i.test(message)){
       // 保险：系统管理对象不在业务表里，qa 查不到 → 强制走工具
@@ -1592,7 +1603,7 @@ async function handle(req,res){
         try{
           const result=await executeTool(tc.tool,tc.args||{});
           data={tool:tc.tool,result};
-          reply=await renderToolReply(tc.tool,result,message);
+          reply=await renderToolReply(tc.tool,result,message,b.history);
           return json(res,200,{ok:true,intent:'tool',confidence:conf,reply,data,audit_ids:result.audit_id?[result.audit_id]:[],undoable:!!result.audit_id});
         }catch(e){ reply='工具执行失败：'+String(e.message||e).slice(0,150); return json(res,200,{ok:false,intent:'tool',reply,data:{}}); }
       }
@@ -1604,8 +1615,10 @@ async function handle(req,res){
         data.answer=reply; data.degraded=true;
       } else {
         if(!getAIConfig().base_url||!getAIConfig().api_key) return json(res,503,{detail:'AI 未配置'});
-        const sys=buildAgentSystem('qa',{__raw:message})+'\n\n'+nowContext();
-        const resp=await callAI([{role:'system',content:sys+'\n\n'+buildContext(message)},{role:'user',content:message}],false);
+        const sys=buildAgentSystem('qa',{__raw:message})+'\n\n'+nowContext()+'\n\n'+buildContext(message);
+        const qaMsgs=[{role:'system',content:sys}].concat(historyToMessages(b.history))
+          .concat([{role:'user',content:message}]);
+        const resp=await callAI(qaMsgs,false);
         const d=await resp.json();
         reply=d.choices?.[0]?.message?.content||'（无返回）';
         data.answer=reply;
@@ -1636,7 +1649,7 @@ async function handle(req,res){
         const result=await executeTool(tc.tool,tc.args||{});
         data={tool:tc.tool,result};
         // 工具结果直接格式化为可读文本，禁止 LLM 重写（否则会忽略事实自由发挥）
-        reply=await renderToolReply(tc.tool,result,message);
+        reply=await renderToolReply(tc.tool,result,message,b.history);
         return json(res,200,{ok:true,intent:'tool',confidence:conf,reply,data,audit_ids:result.audit_id?[result.audit_id]:[],undoable:!!result.audit_id});
       }catch(e){
         return json(res,200,{ok:false,intent:'tool',reply:'工具执行失败：'+String(e.message||e).slice(0,150)});
