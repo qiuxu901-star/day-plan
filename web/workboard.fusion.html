@@ -3823,6 +3823,8 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
     agentState.busy=true;
     var sendBtn=$('agentSend'), inp=$('agentInput');
     if(sendBtn) sendBtn.disabled=true;
+    // 消息已发出即清空输入框（无论后续成功/失败/等待），避免重复发送
+    if(inp) inp.value='';
     agentBubble('me', escHtml(text));
     agentTyping(true);
     agentState.history.push({role:'me',text:text,ts:Date.now()}); saveAgentHistory();
@@ -3874,7 +3876,7 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
       .finally(function(){
         agentState.busy=false;
         if(sendBtn) sendBtn.disabled=false;
-        if(inp){ inp.value=''; inp.focus(); }
+        if(inp) inp.focus();
       });
   }
   // 历史对话：默认收起，点按钮展开；刷新后从 localStorage 恢复（只重建显示，不重新请求后端）
