@@ -266,12 +266,16 @@ function formatToolResult(tool, r){
   try{ return JSON.stringify(r); }catch(e){ return String(r); }
 }
 
-// 工具执行结果交给 LLM 按 system 提示词表达；失败才用 JSON 原文兜底
+// 工具执行结果交给 LLM 按 system 提示词表达；失败也不把原始JSON甩给用户
 async function renderToolReply(tool, result, message, history){
-  const raw=formatToolResult(tool,result);
-  const rendered=await renderWithSkill('tool',{__raw:message},
-    {工具:tool,执行结果:result}, raw, history);
-  return rendered||raw;
+  const facts={工具:tool,执行结果:result};
+  let rendered=await renderWithSkill('tool',{__raw:message},facts,'',history);
+  if(!rendered) rendered=await renderWithSkill('tool',{__raw:message},facts,'');  // 不带历史再试一次
+  if(rendered) return rendered;
+  // 人话兜底：只说动作成败与数量，绝不输出原始 JSON / record_id 明细
+  if(result && result.ok===false) return '这一步没成功，请再说一次要做什么。';
+  const n=(result && (result.updated||result.deleted)) || (result&&result.created&&result.created.length) || 1;
+  return '已处理完成（'+n+' 条），需要我把结果展开说清楚就告诉我。';
 }
 
 // 确定性关键词路由：常见系统管理请求直接映射工具，不依赖 LLM 选择
@@ -535,7 +539,9 @@ function historySearch(question){
     try{ rows=db.prepare(sql).all(...args); }catch(e){ return; }
     if(!rows.length) return;
     found[t]=rows.length;
-    const lines=rows.map(r=>cs.map(k=>`${k}:${r[k]??''}`).join(' | '));
+    // 只给可读业务字段，排除 record_id 等内部字段，避免 LLM 原样复述 JSON
+    const show=cs.filter(k=>/任务名称|事项二|内容|事项|状态|优先级|日期|计划日|到期日|时长|开始时间|结束时间|类型|标签|今日完成|明日计划|本周目标|周总结/.test(k));
+    const lines=rows.map(r=>show.map(k=>`${k}=${r[k]??''}`).join(' / '));
     parts.push(`【${LABELS[t]} 命中${rows.length}条】\n${lines.join('\n')}`);
   });
   // 只向 LLM 提供原始数据，不写"不得编造/可放宽条件"这类指令式文案——避免被当成回复原样说出
@@ -549,12 +555,15 @@ function buildContext(question){
     if(hits<3){
       const parts=[r.text];
       ['task','time','inbox','review','week'].forEach(t=>{
-        const rows=db.prepare(`SELECT * FROM ${q(t)} ORDER BY rowid DESC LIMIT 30`).all();
+        const rows=db.prepare(`SELECT * FROM ${q(t)} ORDER BY rowid DESC LIMIT 15`).all();
         if(!rows.length) return;
-        const cs=cols(t).filter(x=>!META_COLS.has(x));
-        parts.push(`【${LABELS[t]} 概览(最近${rows.length}条)】\n`+rows.map(x=>cs.map(k=>`${k}:${x[k]??''}`).join(' | ')).join('\n'));
+        // 只给业务可读字段，排除 record_id/内部元数据，避免 LLM 原样复述原始JSON
+        const skip=/^(record_id|_.*|类型转换分类|使用类型)$/;
+        const cs=cols(t).filter(x=>!META_COLS.has(x)&&!skip.test(x)&&/任务名称|事项二|内容|事项|状态|优先级|日期|计划日|到期日|时长|开始时间|结束时间|类型|标签|今日完成|明日计划|本周目标|周总结/.test(x));
+        if(!cs.length) return;
+        parts.push(`【${LABELS[t]} 最近${rows.length}条】\n`+rows.map(x=>cs.map(k=>`${k}=${x[k]??''}`).join(' / ')).join('\n'));
       });
-      return parts.join('\n\n').slice(0,30000);
+      return parts.join('\n\n').slice(0,20000);
     }
     return r.text;
   }
