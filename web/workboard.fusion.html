@@ -3891,11 +3891,16 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
       return;
     }
     var emp=$('agentEmpty'); if(emp) emp.style.display='none';
+    // 恢复历史：临时关掉平滑滚动，避免逐条 append 时每条都触发滚动动画（表现为自上而下滚一遍）
+    var oldBehavior=box.style.scrollBehavior;
+    box.style.scrollBehavior='auto';
     hist.forEach(function(h){
       var html=(h.role==='me')?escHtml(h.text||''):mdToHtml(h.text||'');
       agentBubble(h.role||'ai',html,null);
     });
-    box.scrollTop=box.scrollHeight;
+    box.scrollTop=box.scrollHeight;   // 一次性跳到最新，无动画
+    // 恢复平滑滚动（后续新消息仍平滑）
+    box.style.scrollBehavior=oldBehavior||'';
   }
   function initAgent(){
     // 恢复历史：气泡全部进 DOM，默认停在底部只看最新；向上滑即可看到更早对话
