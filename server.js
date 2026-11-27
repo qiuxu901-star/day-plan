@@ -887,8 +887,14 @@ function agentRecord(slots){
   const items=(slots&&slots.items)||[];
   if(!items.length) return {created:[],errors:['没有可写入的条目']};
   const created=[], errors=[];
+  const MAIN_KEY={task:'任务名称',time:'事项',inbox:'内容',review:'日期',week:'周次'}[target]||'任务名称';
   items.forEach((item,i)=>{
-    if(!item || typeof item!=='object'){ errors.push('第'+(i+1)+'条不是对象，未写入'); return; }
+    // LLM 有时把 items 抽成字符串数组（如 ["产品周会","工单日清"]），
+    // 这属于格式差异而非内容错误——按目标表主字段归一，不再整条拒掉。
+    if(typeof item==='string' || typeof item==='number'){
+      item={[MAIN_KEY]:String(item)};
+    }
+    if(!item || typeof item!=='object'){ errors.push('第'+(i+1)+'条格式无法识别，未写入'); return; }
     // 字段名别名照常映射（方便 Agent 用英文键），但不再按白名单过滤：
     // 底层 addRecord 只会写入该表真实存在的列，不存在的列由数据库层天然忽略。
     const clean={};
@@ -904,6 +910,11 @@ function agentRecord(slots){
     if(clean['日期'] && !/T/.test(String(clean['日期']))) clean['日期']=String(clean['日期']).slice(0,10)+'T00:00:00Z';
     if(clean['计划日'] && !/T/.test(String(clean['计划日']))) clean['计划日']=String(clean['计划日']).slice(0,10)+'T00:00:00Z';
     if(clean['到期日'] && !/T/.test(String(clean['到期日']))) clean['到期日']=String(clean['到期日']).slice(0,10)+'T00:00:00Z';
+    // 用户定：任务没给日期就放今天，确保能出现在日计划表里（相对日期仍由 LLM 自己算）
+    if(target==='task' && !clean['计划日'] && !clean['到期日']){
+      clean['计划日']=dateToday()+'T00:00:00Z';
+      clean['到期日']=clean['计划日'];
+    }
 
     const r=addRecord(target, clean, 'agent');
     created.push(Object.assign({table:target}, clean, {record_id:r.record_id}));
